@@ -41,6 +41,21 @@ SyncForge is a powerful, web-based Integrated Development Environment (IDE) that
 
 https://sync-forge-ide-v2.vercel.app/
 
+
+
+<img width="1919" height="863" alt="image" src="https://github.com/user-attachments/assets/28f41892-5d1a-4408-aa70-e023511d0787" />
+
+<img width="1" height="6" alt="image" src="https://github.com/user-attachments/assets/3e240f84-dbc2-43c7-89c3-0a1cabeaf5b6" />
+
+<img width="1918" height="872" alt="image" src="https://github.com/user-attachments/assets/77feea39-547a-4aa0-809a-d9a670b896d2" />
+
+<img width="1919" height="869" alt="image" src="https://github.com/user-attachments/assets/0f7d80ab-bf98-49e9-ae0b-e4da4c8738d5" />
+
+<img width="1917" height="865" alt="image" src="https://github.com/user-attachments/assets/9ee3634d-ac83-4952-b46d-d6a8c4670045" />
+
+<img width="1919" height="866" alt="image" src="https://github.com/user-attachments/assets/a6142480-a1e2-4ade-bac6-1e47847b913d" />
+
+
 ## Key Features
 
 - **👨‍💻 Real-time Collaborative Editor**: A multi-file Monaco Editor instance synchronized using **Operational Transformation (OT)** via ShareDB, ensuring conflict-free, low-latency collaborative coding with shared cursors.
