@@ -39,9 +39,7 @@ SyncForge is a powerful, web-based Integrated Development Environment (IDE) that
 
 ## Live Demo
 
-**(Placeholder: Add a link to your deployed application here)**
-
-`[sync-forge-ide-v2.vercel.app](https://sync-forge-ide-v2.vercel.app/)`
+https://sync-forge-ide-v2.vercel.app/
 
 ## Key Features
 
