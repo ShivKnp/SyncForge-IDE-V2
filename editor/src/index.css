@@ -1,0 +1,971 @@
+/* Add to your index.css or create a new CSS file */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* Modern VS Code-inspired theme */
+:root {
+  --bg-primary: #1e1e1e;
+  --bg-secondary: #252526;
+  --bg-tertiary: #2d2d30;
+  --bg-active: #37373d;
+  --border-color: #404040;
+  --text-primary: #cccccc;
+  --text-secondary: #969696;
+  --accent-blue: #007acc;
+  --accent-blue-hover: #1183d4;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+/* Activity Bar */
+.bg-gray-800 {
+  background-color: var(--bg-secondary);
+}
+
+.border-gray-700 {
+  border-color: var(--border-color);
+}
+
+/* Left Sidebar */
+.bg-gray-800 {
+  background-color: var(--bg-secondary);
+}
+
+/* Editor Area */
+.bg-gray-900 {
+  background-color: var(--bg-primary);
+}
+
+/* Tab styling */
+.bg-gray-800 {
+  background-color: var(--bg-secondary);
+}
+
+.bg-gray-750 {
+  background-color: #2a2a2a;
+}
+
+.bg-gray-900 {
+  background-color: var(--bg-primary);
+}
+
+/* Button styling */
+.ant-btn {
+  border-radius: 3px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.ant-btn-primary {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+}
+
+.ant-btn-primary:hover, .ant-btn-primary:focus {
+  background: var(--accent-blue-hover);
+  border-color: var(--accent-blue-hover);
+}
+
+/* Modal styling */
+.host-controls-modal .ant-modal-content {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+}
+
+.host-controls-modal .ant-modal-header {
+  background-color: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.host-controls-modal .ant-modal-title {
+  color: var(--text-primary);
+}
+
+.host-controls-modal .ant-modal-close {
+  color: var(--text-secondary);
+}
+
+/* Select dropdown styling */
+.config-select .ant-select-selector {
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+
+.config-select .ant-select-arrow {
+  color: var(--text-secondary);
+}
+
+/* Switch styling */
+.ant-switch-checked {
+  background-color: var(--accent-blue);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: #424242;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4e4e4e;
+}
+
+/* File tree styling */
+.file-tree {
+  padding: 4px 0;
+}
+
+.file-tree-item {
+  padding: 4px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.file-tree-item:hover {
+  background-color: var(--bg-active);
+}
+
+.file-tree-item.active {
+  background-color: var(--accent-blue);
+  color: white;
+}
+
+/* Terminal styling */
+.terminal-panel {
+  background-color: var(--bg-primary);
+  border-top: 1px solid var(--border-color);
+  height: 200px;
+  overflow: auto;
+}
+
+/* Resizable handle styling */
+.re-resizable-handle {
+  background-color: var(--border-color);
+  transition: background-color 0.2s ease;
+}
+
+.re-resizable-handle:hover {
+  background-color: var(--accent-blue);
+}
+
+/* Enhanced styles for the collapsible sidebar */
+.collapsible-sidebar {
+  transition: width 0.3s ease;
+}
+
+.sidebar-content {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+/* Custom scrollbar for sidebar */
+.sidebar-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Animation for expanding/collapsing */
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.sidebar-panel {
+  animation: slideIn 0.2s ease;
+}
+
+/* Hover effects for activity bar icons */
+.activity-icon {
+  transition: all 0.2s ease;
+}
+
+.activity-icon:hover {
+  transform: scale(1.1);
+}
+
+/* Responsive adjustments */
+@media (max-width: 1024px) {
+  .collapsible-sidebar {
+    width: 240px !important;
+  }
+}
+
+/* Add to your CSS file */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* Modern VS Code-inspired theme */
+:root {
+  --bg-primary: #1e1e1e;
+  --bg-secondary: #252526;
+  --bg-tertiary: #2d2d30;
+  --bg-active: #37373d;
+  --border-color: #404040;
+  --text-primary: #cccccc;
+  --text-secondary: #969696;
+  --accent-blue: #007acc;
+  --accent-blue-hover: #1183d4;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+/* Activity Bar */
+.bg-gray-800 {
+  background-color: var(--bg-secondary);
+}
+
+.border-gray-700 {
+  border-color: var(--border-color);
+}
+
+/* Left Sidebar */
+.bg-gray-800 {
+  background-color: var(--bg-secondary);
+}
+
+/* Editor Area */
+.bg-gray-900 {
+  background-color: var(--bg-primary);
+}
+
+/* Tab styling */
+.bg-gray-800 {
+  background-color: var(--bg-secondary);
+}
+
+.bg-gray-750 {
+  background-color: #2a2a2a;
+}
+
+.bg-gray-900 {
+  background-color: var(--bg-primary);
+}
+
+/* Button styling */
+.ant-btn {
+  border-radius: 3px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.ant-btn-primary {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+}
+
+.ant-btn-primary:hover, .ant-btn-primary:focus {
+  background: var(--accent-blue-hover);
+  border-color: var(--accent-blue-hover);
+}
+
+/* Modal styling */
+.host-controls-modal .ant-modal-content {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+}
+
+.host-controls-modal .ant-modal-header {
+  background-color: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.host-controls-modal .ant-modal-title {
+  color: var(--text-primary);
+}
+
+.host-controls-modal .ant-modal-close {
+  color: var(--text-secondary);
+}
+
+/* Select dropdown styling */
+.config-select .ant-select-selector {
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+
+.config-select .ant-select-arrow {
+  color: var(--text-secondary);
+}
+
+/* Switch styling */
+.ant-switch-checked {
+  background-color: var(--accent-blue);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: #424242;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4e4e4e;
+}
+
+/* File tree styling */
+.file-tree {
+  padding: 4px 0;
+}
+
+.file-tree-item {
+  padding: 4px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.file-tree-item:hover {
+  background-color: var(--bg-active);
+}
+
+.file-tree-item.active {
+  background-color: var(--accent-blue);
+  color: white;
+}
+
+/* Terminal styling */
+.terminal-panel {
+  background-color: var(--bg-primary);
+  border-top: 1px solid var(--border-color);
+  height: 200px;
+  overflow: auto;
+}
+
+/* Resizable handle styling */
+.re-resizable-handle {
+  background-color: var(--border-color);
+  transition: background-color 0.2s ease;
+}
+
+.re-resizable-handle:hover {
+  background-color: var(--accent-blue);
+}
+
+/* Enhanced styles for the collapsible sidebar */
+.collapsible-sidebar {
+  transition: width 0.3s ease;
+}
+
+.sidebar-content {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+/* Custom scrollbar for sidebar */
+.sidebar-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Animation for expanding/collapsing */
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.sidebar-panel {
+  animation: slideIn 0.2s ease;
+}
+
+/* Hover effects for activity bar icons */
+.activity-icon {
+  transition: all 0.2s ease;
+}
+
+.activity-icon:hover {
+  transform: scale(1.1);
+}
+
+/* Responsive adjustments */
+@media (max-width: 1024px) {
+  .collapsible-sidebar {
+    width: 240px !important;
+  }
+}
+
+/* Monaco Editor customizations */
+.monaco-editor {
+  font-family: 'Fira Code', 'Monaco', 'Cascadia Code', 'Source Code Pro', monospace !important;
+}
+
+.monaco-editor .margin {
+  background-color: #1e1e1e !important;
+}
+
+/* Status bar styling */
+.editor-status-bar {
+  font-size: 11px;
+  user-select: none;
+}
+
+/* ---------- Dark Select: selector box ---------- */
+.dark-select .ant-select-selector {
+  background: #0b1220 !important;        /* panel background */
+  border: 1px solid #263142 !important;  /* match panel border */
+  border-radius: 8px !important;         /* match outer card radius */
+  min-height: 38px !important;           /* consistent height */
+  height: 38px !important;
+  display: flex !important;
+  align-items: center !important;        /* vertically center text */
+  padding-left: 10px !important;         /* remove the large internal gaps */
+  padding-right: 38px !important;        /* leave room for arrow */
+  box-shadow: none !important;
+  overflow: hidden !important;           /* hide inner scrollbars/bars */
+}
+
+/* remove inner background boxes that can appear in some antd versions */
+.dark-select .ant-select-selector .ant-select-selection-overflow,
+.dark-select .ant-select-selection-overflow {
+  background: transparent !important;
+}
+
+/* text / placeholder inside selector */
+.dark-select .ant-select-selection-item,
+.dark-select .ant-select-selection-placeholder {
+  color: #e5e7eb !important;
+  margin: 0 !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  padding: 0 !important;                 /* rely on selector padding above */
+}
+
+/* input (if present) */
+.dark-select .ant-select-selection-search-input {
+  background: transparent !important;
+  color: inherit !important;
+  height: auto !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+/* position the arrow cleanly inside selector */
+.dark-select .ant-select-arrow {
+  right: 10px !important;
+  color: #9ca3af !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  pointer-events: none;
+}
+
+/* remove weird extra inner rounded layers */
+.dark-select .ant-select-selector:before,
+.dark-select .ant-select-selector:after {
+  display: none !important;
+}
+
+/* make sure focus looks like your other controls */
+.dark-select .ant-select-focused .ant-select-selector,
+.dark-select .ant-select-selector:focus {
+  box-shadow: none !important;
+  border-color: #3B82F6 !important;
+}
+
+/* ---------- Dropdown (panel) ---------- */
+.ant-select-dropdown.dark-select-dropdown {
+  background: #0f1724 !important;
+  border: 1px solid #263142 !important;
+  box-shadow: 0 8px 24px rgba(2,6,23,0.6) !important;
+  border-radius: 8px !important;
+  padding: 6px 0 !important;
+}
+
+/* item appearance */
+.ant-select-dropdown.dark-select-dropdown .ant-select-item-option {
+  background: transparent !important;
+  color: #e5e7eb !important;
+  padding: 8px 14px !important;
+}
+
+/* selected / hovered item */
+.ant-select-dropdown.dark-select-dropdown .ant-select-item-option-active,
+.ant-select-dropdown.dark-select-dropdown .ant-select-item-option-selected {
+  background: #111827 !important;
+  color: #ffffff !important;
+}
+
+/* item content */
+.ant-select-dropdown.dark-select-dropdown .ant-select-item-option-content {
+  color: inherit !important;
+}
+
+/* disabled item */
+.ant-select-dropdown.dark-select-dropdown .ant-select-item-option-disabled {
+  color: #6b7280 !important;
+}
+
+/* virtual list / scroll holder background */
+.ant-select-dropdown.dark-select-dropdown .rc-virtual-list-holder-inner,
+.ant-select-dropdown.dark-select-dropdown .ant-select-item-option {
+  background: transparent !important;
+}
+
+/* ensure dropdown width can expand a bit and not clip text */
+.ant-select-dropdown.dark-select-dropdown.ant-select-dropdown-placement-bottomLeft,
+.ant-select-dropdown.dark-select-dropdown.ant-select-dropdown-placement-bottomRight {
+  min-width: 160px !important;
+}
+
+
+/* Host controls modal dark styling */
+.host-controls-modal .ant-modal-content,
+.host-controls-modal .ant-modal-body,
+.host-controls-modal .ant-modal-header,
+.host-controls-modal .ant-modal-footer {
+  background: #0b1220 !important;
+  color: #e6eef8 !important;
+  border-radius: 12px !important;
+  border-color: rgba(255,255,255,0.04) !important;
+}
+
+.host-controls-modal .ant-modal-header {
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+
+.host-controls-modal .ant-modal-footer {
+  border-top: 1px solid rgba(255,255,255,0.04);
+  background: transparent;
+}
+
+.host-controls-modal .ant-select-selector {
+  background: #111827 !important;
+  border-color: rgba(255,255,255,0.06) !important;
+  color: #e6eef8 !important;
+}
+
+.host-controls-modal .ant-switch-checked {
+  background-color: #3b82f6 !important;
+}
+/* Custom scrollbar for sidebar to match theme */
+.sidebar-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar-scrollbar::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.3);
+  border-radius: 3px;
+}
+
+.sidebar-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 3px;
+}
+
+.sidebar-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.6);
+}
+
+/* Resize handle styling */
+.react-resizable-handle::after {
+  border-color: rgba(148, 163, 184, 0.3) !important;
+}
+
+/* Tooltip styling to match theme */
+.ant-tooltip-inner {
+  background-color: #0f172a !important;
+  color: #e2e8f0 !important;
+  font-size: 12px;
+  border-radius: 6px;
+}
+
+.ant-tooltip-arrow-content {
+  background-color: #0f172a !important;
+}
+/* Custom scrollbar styling */
+.scrollbar-thin::-webkit-scrollbar {
+  height: 6px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.3);
+  border-radius: 3px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 3px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.6);
+}
+
+/* Modal styling */
+.host-controls-modal .ant-modal-close {
+  color: #94a3b8;
+}
+
+.host-controls-modal .ant-modal-close:hover {
+  color: #22d3ee;
+}
+
+/* Select dropdown styling */
+.config-select .ant-select-selector {
+  background-color: #1e293b !important;
+  border-color: #334155 !important;
+  color: #e2e8f0 !important;
+}
+
+.config-select .ant-select-arrow {
+  color: #94a3b8 !important;
+}
+
+/* Switch styling */
+.ant-switch-checked {
+  background-color: #22d3ee !important;
+}
+
+.ant-switch {
+  background-color: #475569 !important;
+}
+
+/* Custom dropdown styling */
+.ant-dropdown-menu {
+  background-color: rgb(15 23 42 / 0.95) !important;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+}
+
+.ant-dropdown-menu-item {
+  color: #e2e8f0 !important;
+  padding: 8px 12px !important;
+}
+
+.ant-dropdown-menu-item:hover {
+  background-color: rgba(56, 189, 248, 0.1) !important;
+  color: #22d3ee !important;
+}
+
+/* Tooltip styling */
+.ant-tooltip-inner {
+  background-color: #0f172a !important;
+  color: #e2e8f0 !important;
+  font-size: 12px;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.ant-tooltip-arrow-content {
+  background-color: #0f172a !important;
+}
+
+/* Button hover effects */
+.hover-lift {
+  transition: transform 0.2s ease, background-color 0.2s ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-1px);
+}
+
+/* Custom select styling for dark theme */
+.ant-select:not(.ant-select-customize-input) .ant-select-selector {
+  background-color: rgb(30 41 59 / 0.6) !important;
+  border-color: rgb(71 85 105) !important;
+  color: #e2e8f0 !important;
+}
+
+.ant-select:not(.ant-select-customize-input) .ant-select-selector:hover {
+  border-color: rgb(94 234 212) !important;
+}
+
+.ant-select-focused:not(.ant-select-disabled).ant-select:not(.ant-select-customize-input) .ant-select-selector {
+  border-color: rgb(94 234 212) !important;
+  box-shadow: 0 0 0 2px rgba(94, 234, 212, 0.2) !important;
+}
+
+.ant-select-item-option-selected:not(.ant-select-item-option-disabled) {
+  background-color: rgba(56, 189, 248, 0.1) !important;
+  color: #22d3ee !important;
+}
+
+.ant-select-item {
+  color: #e2e8f0 !important;
+}
+
+.ant-select-item:hover {
+  background-color: rgba(56, 189, 248, 0.1) !important;
+}
+
+.ant-select-arrow {
+  color: #94a3b8 !important;
+}
+
+/* TextArea styling */
+.ant-input {
+  background-color: rgb(30 41 59 / 0.6) !important;
+  border-color: rgb(71 85 105) !important;
+  color: #e2e8f0 !important;
+}
+
+.ant-input:hover {
+  border-color: rgb(94 234 212) !important;
+}
+
+.ant-input-focused {
+  border-color: rgb(94 234 212) !important;
+  box-shadow: 0 0 0 2px rgba(94, 234, 212, 0.2) !important;
+}
+
+.ant-input::placeholder {
+  color: #94a3b8 !important;
+}
+
+/* Custom dropdown styling for participant menu */
+.ant-dropdown-menu {
+  background-color: rgb(15 23 42 / 0.95) !important;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+}
+
+.ant-dropdown-menu-item {
+  color: #e2e8f0 !important;
+  padding: 8px 12px !important;
+}
+
+.ant-dropdown-menu-item:hover {
+  background-color: rgba(56, 189, 248, 0.1) !important;
+  color: #22d3ee !important;
+}
+
+.ant-dropdown-menu-item-danger {
+  color: #f87171 !important;
+}
+
+.ant-dropdown-menu-item-danger:hover {
+  background-color: rgba(248, 113, 113, 0.1) !important;
+  color: #fca5a5 !important;
+}
+
+/* Avatar styling */
+.ant-avatar {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+/* Scrollbar styling for participants list */
+.participants-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.participants-scrollbar::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.3);
+  border-radius: 3px;
+}
+
+.participants-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 3px;
+}
+
+.participants-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.6);
+}
+
+/* Custom modal styling for video */
+.video-modal .ant-modal-content {
+  background-color: rgb(15 23 42 / 0.95) !important;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  color: #e2e8f0;
+}
+
+.video-modal .ant-modal-header {
+  background-color: rgb(15 23 42);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px 12px 0 0;
+  color: #e2e8f0;
+}
+
+.video-modal .ant-modal-title {
+  color: #e2e8f0;
+}
+
+.video-modal .ant-modal-body {
+  color: #e2e8f0;
+}
+
+/* Video tile enhancements */
+.video-tile {
+  transition: all 0.3s ease;
+}
+
+.video-tile:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+}
+
+/* Button hover effects */
+.media-control-btn {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.media-control-btn:hover {
+  transform: scale(1.05);
+}
+
+/* remote selection highlight (semi-transparent) */
+.remote-selection {
+  opacity: 0.35;
+  border-radius: 2px;
+}
+
+/* caret bar */
+.remote-caret {
+  width: 2px;
+  height: 1.2em;
+  border-radius: 1px;
+  box-shadow: 0 0 8px rgba(0,0,0,0.4);
+}
+
+/* small label above caret */
+.remote-caret-label {
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: white;
+  white-space: nowrap;
+  transform: translateY(-120%);
+  box-shadow: 0 4px 12px rgba(2,6,23,0.6);
+  pointer-events: none;
+}
+
+
+/* Custom modal styling for chat */
+.chat-modal .ant-modal-content {
+  background-color: rgb(15 23 42 / 0.95) !important;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  color: #e2e8f0;
+}
+
+.chat-modal .ant-modal-header {
+  background-color: rgb(15 23 42);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px 12px 0 0;
+  color: #e2e8f0;
+}
+
+.chat-modal .ant-modal-title {
+  color: #e2e8f0;
+}
+
+.chat-modal .ant-modal-body {
+  color: #e2e8f0;
+}
+
+/* Code block styling */
+.code-block {
+  background: rgb(15 23 42 / 0.8) !important;
+  border: 1px solid rgba(56, 189, 248, 0.2) !important;
+  color: #e2e8f0 !important;
+}
+
+.code-block::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.code-block::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.3);
+  border-radius: 3px;
+}
+
+.code-block::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 3px;
+}
+
+.code-block::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.6);
+}
+
+/* Message bubble transitions */
+.chat-message-bubble {
+  transition: all 0.2s ease;
+}
+
+.chat-message-bubble:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+}
+/* Target the button on hover */
+.search-button:hover {
+  /* Changed to a semi-transparent black. For solid black, use "#000000". */
+  background-color: rgba(0, 0, 0, 0.5) !important; 
+}
+
+/* The icon color on hover can remain cyan for great contrast */
+.search-button:hover svg {
+  color: #020202 !important; /* This is text-cyan-400 */
+}
+
+
+/* Smooth transitions for docking */
+.code-editor-container, .ai-docked-container {
+  transition: all 0.3s ease;
+}
+
+.ai-docked-container {
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+

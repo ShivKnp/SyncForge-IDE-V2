@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  backend:
+    build: 
+      context: ./editor-backend
+      dockerfile: Dockerfile
+    container_name: codecrew-backend
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./editor-backend:/app
+      - /app/node_modules
+    networks:
+      - codecrew-network
+    command: npm run dev
+
+  frontend:
+    build:
+      context: ./editor
+      dockerfile: Dockerfile
+    container_name: codecrew-frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./editor:/app
+      - /app/node_modules
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+      - REACT_APP_SERVER_URL=http://localhost:8080
+      - REACT_APP_WEB_SOCKET_URL=ws://localhost:8080
+    depends_on:
+      - backend
+    networks:
+      - codecrew-network
+
+networks:
+  codecrew-network:
+    driver: bridge

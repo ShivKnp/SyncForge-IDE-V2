@@ -1,0 +1,34 @@
+/* editor/src/main.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg-dark: #0b1220;
+    --bg-light: #f4f7f9;
+    --text-dark: #e6eef8;
+    --text-light: #172022;
+  }
+}
+
+html, body, #root, .App {
+  height: 100%;
+  @apply bg-zinc-900 text-slate-100;
+  font-family: 'Inter', sans-serif;
+}
+
+body.light-theme {
+  @apply bg-slate-50 text-slate-800;
+}
+
+/* Monaco Editor Cursor */
+.monaco-editor .cursor-position {
+  background: #ff5555 !important;
+  width: 2px !important;
+}
+
+/* Monaco Editor Scrollbars */
+.monaco-editor .monaco-scrollable-element .scrollbar .slider {
+  background: rgba(255, 255, 255, 0.15) !important;
+}
