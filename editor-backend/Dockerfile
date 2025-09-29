@@ -28,7 +28,8 @@ EXPOSE 8080
 
 # Simple healthcheck so Docker can mark container unhealthy quickly
 HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
-  CMD curl -f http://localhost:8080/health || exit 1
+  CMD curl -f https://syncforge-ide-v2.onrender.com/health || exit 1
 
 # Start in dev mode by default (nodemon). For production, use: CMD ["npm","start"]
 CMD ["npm", "run", "dev"]
+
