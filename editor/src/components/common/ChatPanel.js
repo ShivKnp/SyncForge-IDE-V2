@@ -87,16 +87,42 @@ const ChatPanel = ({ roomId, userName, ownerName, onUploadDone, onUnreadChange }
   const [unreadCount, setUnreadCount] = useState(0);
   const [showJump, setShowJump] = useState(false);
 
-  // load messages from sessionStorage on mount
+  // load messages from sessionStorage on mount and scroll to bottom
   useEffect(() => {
-    const stored = sessionStorage.getItem(getSessionStorageKey(roomId));
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
+    try {
+      const s = sessionStorage.getItem(getSessionStorageKey(roomId));
+      if (s) {
+        const parsed = JSON.parse(s);
         setMessages(Array.isArray(parsed) ? parsed.map(normalizeMsg) : []);
-      } catch (e) { console.error('failed to parse messages', e); }
+        // Force scroll to bottom after loading messages
+        setTimeout(() => {
+          if (listRef.current) {
+            listRef.current.scrollTop = listRef.current.scrollHeight;
+          }
+        }, 100);
+      }
+    } catch (e) {
+      console.error('failed to parse messages', e);
     }
   }, [roomId]);
+
+  // Scroll to bottom when component becomes visible
+  useEffect(() => {
+    const scrollToBottom = () => {
+      if (listRef.current) {
+        listRef.current.scrollTop = listRef.current.scrollHeight;
+      }
+    };
+    
+    // Scroll immediately
+    scrollToBottom();
+    
+    // Also scroll after a brief delay to ensure content is rendered
+    const timeout = setTimeout(scrollToBottom, 150);
+    
+    return () => clearTimeout(timeout);
+  }, []); // Run only on mount
+ 
 
   // persist messages to sessionStorage
   useEffect(() => {
