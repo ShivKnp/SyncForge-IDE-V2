@@ -705,26 +705,6 @@ const CodeEditor = ({
         {/* Enhanced Toolbar */}
         <div className="code-editor-toolbar">
           <Space size="small" className="toolbar-left">
-            <Tooltip title={readOnly ? 'Read-only (host-only editing enabled)' : 'New File'} color="#0f172a">
-              <Button
-                type="text"
-                icon={<FileAddOutlined className="button-icon" />}
-                onClick={() => onNewFile && onNewFile(`untitled-${Date.now()}.txt`)}
-                disabled={readOnly}
-                className={getEnhancedButtonClassName()}
-              />
-            </Tooltip>
-
-            <Tooltip title={readOnly ? 'Read-only (host-only editing enabled)' : 'New Folder'} color="#0f172a">
-              <Button
-                type="text"
-                icon={<FolderAddOutlined className="button-icon" />}
-                onClick={() => onNewFolder && onNewFolder(`new-folder-${Date.now()}`)}
-                disabled={readOnly}
-                className={getEnhancedButtonClassName()}
-              />
-            </Tooltip>
-
             <Tooltip title={readOnly ? 'Read-only (host-only editing enabled)' : 'Upload Files'} color="#0f172a">
               <Button
                 type="text"
