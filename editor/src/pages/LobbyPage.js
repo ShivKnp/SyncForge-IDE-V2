@@ -419,7 +419,7 @@ const LobbyPage = () => {
                     data-mode="polyglot"
                   >
                     <FaGlobe className="mode-icon" />
-                    <span className="mode-label">Polyglot</span>
+                    <span className="mode-label">Playground</span>
                   </button>
                 </div>
               </div>
@@ -1448,5 +1448,6 @@ const LobbyPage = () => {
     </>
   );
 };
+
 
 export default LobbyPage;
