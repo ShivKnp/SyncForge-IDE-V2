@@ -828,6 +828,12 @@ const RenameItemModal = ({
     </Modal>
   );
 };
+ const isOperationAllowed = () => {
+    if (editingMode === 'host-only' && !isHost) {
+      return false;
+    }
+    return true;
+  };
 
 // TreeNode Component
 const TreeNode = ({ 
@@ -854,11 +860,12 @@ const TreeNode = ({
   onRequestRename,
   onRequestDelete,
   isDragging,
-  dragPreview,onDragEnd,
+  dragPreview,onDragEnd,isOperationAllowed
 }) => {
   const [isExpanded, setIsExpanded] = React.useState(depth < 2);
   const [isAnimating, setIsAnimating] = React.useState(false);
   
+ 
   if (!node) return null;
   
   // Skip rendering if node doesn't match search term (unless it's a parent of a matching node)
@@ -869,6 +876,7 @@ const TreeNode = ({
   const isActive = nodeId === activeFileId;
   const isFolder = node.type === 'folder';
   const isRoot = nodeId === 'root';
+  
   
   const handleExpand = (e) => {
     e?.stopPropagation();
@@ -920,6 +928,7 @@ const TreeNode = ({
   const getFileBadge = (fileName) => {
     if (!fileName || typeof fileName !== 'string') return null;
     if (!fileName.includes('.')) return null;
+    
 
     const extension = fileName.split('.').pop().toLowerCase();
     const badgeMap = {
@@ -971,6 +980,7 @@ const TreeNode = ({
       </Tooltip>
     );
   };
+  
 
   return (
     <div 
@@ -984,7 +994,7 @@ const TreeNode = ({
         onClick={handleSelect} 
         onDoubleClick={handleDoubleClick}
         onContextMenu={(e) => onContextMenu(e, nodeId)}
-        draggable={!isRoot}
+        draggable={!isRoot && isOperationAllowed()}
         onDragStart={(e) => onDragStart(e, nodeId)}
         onDragOver={(e) => onDragOver(e, nodeId)}
         onDragLeave={onDragLeave}
@@ -1044,34 +1054,36 @@ const TreeNode = ({
           {getStatusIndicator(node)}
         </span>
         
-        {isSelected && !isRoot && (
-          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-x-1 group-hover:translate-x-0">
-            <Tooltip title="Rename" color="#0f172a">
-              <Button 
-                type="text" 
-                size="small" 
-                icon={<EditOutlined className="text-[10px]" />} 
-                onClick={(e) => { 
-                  e.stopPropagation(); 
-                  onRequestRename(nodeId);
-                }}
-                className="h-5 w-5 min-w-5 flex items-center justify-center text-slate-400 hover:text-cyan-400 hover:bg-cyan-500/10 transition-all duration-300 rounded hover:scale-110"
-              />
-            </Tooltip>
-            <Tooltip title="Delete" color="#0f172a">
-              <Button 
-                type="text" 
-                size="small" 
-                icon={<DeleteOutlined className="text-[10px]" />} 
-                onClick={(e) => { 
-                  e.stopPropagation(); 
-                  onRequestDelete(nodeId);
-                }}
-                className="h-5 w-5 min-w-5 flex items-center justify-center text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-all duration-300 rounded hover:scale-110"
-              />
-            </Tooltip>
-          </div>
-        )}
+       
+
+{isSelected && !isRoot && isOperationAllowed() && ( // Add isOperationAllowed() check
+  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-x-1 group-hover:translate-x-0">
+    <Tooltip title="Rename" color="#0f172a">
+      <Button 
+        type="text" 
+        size="small" 
+        icon={<EditOutlined className="text-[10px]" />} 
+        onClick={(e) => { 
+          e.stopPropagation(); 
+          onRequestRename(nodeId);
+        }}
+        className="h-5 w-5 min-w-5 flex items-center justify-center text-slate-400 hover:text-cyan-400 hover:bg-cyan-500/10 transition-all duration-300 rounded hover:scale-110"
+      />
+    </Tooltip>
+    <Tooltip title="Delete" color="#0f172a">
+      <Button 
+        type="text" 
+        size="small" 
+        icon={<DeleteOutlined className="text-[10px]" />} 
+        onClick={(e) => { 
+          e.stopPropagation(); 
+          onRequestDelete(nodeId);
+        }}
+        className="h-5 w-5 min-w-5 flex items-center justify-center text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-all duration-300 rounded hover:scale-110"
+      />
+    </Tooltip>
+  </div>
+)}
       </div>
       
       {isFolder && node.children && (
@@ -1108,6 +1120,7 @@ const TreeNode = ({
                 onRequestRename={onRequestRename}
                 onRequestDelete={onRequestDelete}
                 isDragging={isDragging}
+                isOperationAllowed={isOperationAllowed}
                 
               />
             ))}
@@ -1126,13 +1139,15 @@ const ContextMenu = ({
   onCreateFile, 
   onCreateFolder, 
   onRequestRename, 
-  onRequestDelete 
+  onRequestDelete ,editingMode = 'open', // Add this prop
+  isHost = false, // Add this prop
 }) => {
   if (!contextMenu.visible) return null;
   
   const node = tree[contextMenu.nodeId];
   const isFolder = node?.type === 'folder';
   const isRoot = contextMenu.nodeId === 'root';
+  const canEdit = editingMode === 'open' || (editingMode === 'host-only' && isHost);
   
   return (
     <>
@@ -1151,61 +1166,61 @@ const ContextMenu = ({
           {node?.name || 'Actions'}
         </div>
         
-        {isFolder && (
-          <button 
-            className="w-full text-left px-3 py-1.5 text-xs text-slate-300 hover:bg-gradient-to-r hover:from-cyan-600/15 hover:to-cyan-500/8 flex items-center gap-2 transition-all duration-300 hover:text-cyan-300"
-            onClick={() => {
-              onCreateFolder(contextMenu.nodeId);
-              setContextMenu({ ...contextMenu, visible: false });
-            }}
-          >
-            <PlusOutlined className="text-cyan-400 text-xs" /> 
-            <span>New Folder</span>
-          </button>
-        )}
+        {isFolder && canEdit && ( // Add canEdit check
+      <button 
+        className="w-full text-left px-3 py-1.5 text-xs text-slate-300 hover:bg-gradient-to-r hover:from-cyan-600/15 hover:to-cyan-500/8 flex items-center gap-2 transition-all duration-300 hover:text-cyan-300"
+        onClick={() => {
+          onCreateFolder(contextMenu.nodeId);
+          setContextMenu({ ...contextMenu, visible: false });
+        }}
+      >
+        <PlusOutlined className="text-cyan-400 text-xs" /> 
+        <span>New Folder</span>
+      </button>
+    )}
+    
+    {isFolder && canEdit && ( // Add canEdit check
+      <button 
+        className="w-full text-left px-3 py-1.5 text-xs text-slate-300 hover:bg-gradient-to-r hover:from-blue-600/15 hover:to-blue-500/8 flex items-center gap-2 transition-all duration-300 hover:text-blue-300"
+        onClick={() => {
+          onCreateFile(contextMenu.nodeId);
+          setContextMenu({ ...contextMenu, visible: false });
+        }}
+      >
+        <PlusOutlined className="text-blue-400 text-xs" /> 
+        <span>New File</span>
+      </button>
+    )}
+    
+    {!isRoot && canEdit && ( // Add canEdit check
+      <>
+        <div className="h-px bg-slate-700/30 my-1" />
         
-        {isFolder && (
-          <button 
-            className="w-full text-left px-3 py-1.5 text-xs text-slate-300 hover:bg-gradient-to-r hover:from-blue-600/15 hover:to-blue-500/8 flex items-center gap-2 transition-all duration-300 hover:text-blue-300"
-            onClick={() => {
-              onCreateFile(contextMenu.nodeId);
-              setContextMenu({ ...contextMenu, visible: false });
-            }}
-          >
-            <PlusOutlined className="text-blue-400 text-xs" /> 
-            <span>New File</span>
-          </button>
-        )}
+        <button 
+          className="w-full text-left px-3 py-1.5 text-xs text-slate-300 hover:bg-gradient-to-r hover:from-blue-600/15 hover:to-blue-500/8 flex items-center gap-2 transition-all duration-300 hover:text-blue-300"
+          onClick={() => {
+            onRequestRename(contextMenu.nodeId);
+            setContextMenu({ ...contextMenu, visible: false });
+          }}
+        >
+          <EditOutlined className="text-blue-400 text-xs" /> 
+          <span>Rename</span>
+        </button>
         
-        {!isRoot && (
-          <>
-            <div className="h-px bg-slate-700/30 my-1" />
-            
-            <button 
-              className="w-full text-left px-3 py-1.5 text-xs text-slate-300 hover:bg-gradient-to-r hover:from-blue-600/15 hover:to-blue-500/8 flex items-center gap-2 transition-all duration-300 hover:text-blue-300"
-              onClick={() => {
-                onRequestRename(contextMenu.nodeId);
-                setContextMenu({ ...contextMenu, visible: false });
-              }}
-            >
-              <EditOutlined className="text-blue-400 text-xs" /> 
-              <span>Rename</span>
-            </button>
-            
-            <div className="h-px bg-slate-700/30 my-1" />
-            
-            <button 
-              className="w-full text-left px-3 py-1.5 text-xs text-rose-400 hover:bg-gradient-to-r hover:from-rose-600/15 hover:to-rose-500/8 flex items-center gap-2 transition-all duration-300 hover:text-rose-300"
-              onClick={() => {
-                onRequestDelete(contextMenu.nodeId);
-                setContextMenu({ ...contextMenu, visible: false });
-              }}
-            >
-              <DeleteOutlined className="text-rose-400 text-xs" /> 
-              <span>Delete</span>
-            </button>
-          </>
-        )}
+        <div className="h-px bg-slate-700/30 my-1" />
+        
+        <button 
+          className="w-full text-left px-3 py-1.5 text-xs text-rose-400 hover:bg-gradient-to-r hover:from-rose-600/15 hover:to-rose-500/8 flex items-center gap-2 transition-all duration-300 hover:text-rose-300"
+          onClick={() => {
+            onRequestDelete(contextMenu.nodeId);
+            setContextMenu({ ...contextMenu, visible: false });
+          }}
+        >
+          <DeleteOutlined className="text-rose-400 text-xs" /> 
+          <span>Delete</span>
+        </button>
+      </>
+    )}
       </div>
     </>
   );
@@ -1222,11 +1237,19 @@ const FileTree = ({
   onFileClick, 
   activeFileId,
   onMoveNode,
+  editingMode = 'open', 
+  isHost = false, 
 }) => {
+  
   const rootNode = tree?.root;
   const [searchTerm, setSearchTerm] = useState('');
   const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, nodeId: null });
- 
+  const isOperationAllowed = () => {
+    if (editingMode === 'host-only' && !isHost) {
+      return false;
+    }
+    return true;
+  };
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   
   // Add these states to your FileTree component
@@ -1253,6 +1276,7 @@ const [isDragging, setIsDragging] = useState(null);
     nodeId: null,
     node: null
   });
+  
 
   // Close context menu when clicking outside
   useEffect(() => {
@@ -1282,7 +1306,7 @@ const [isDragging, setIsDragging] = useState(null);
 
 // Replace ALL your drag handlers with these:
 const handleDragStart = (e, nodeId) => {
-  if (nodeId === 'root') {
+  if (nodeId === 'root' || !isOperationAllowed()) {
     e.preventDefault();
     return;
   }
@@ -1452,8 +1476,12 @@ const handleDragEnd = (e) => {
   setDraggedItemId(null);
 };
 
-
-const handleCreateFile = (parentNodeId = selectedNodeId || 'root') => {
+ const handleCreateFile = (parentNodeId = selectedNodeId || 'root') => {
+    if (!isOperationAllowed()) {
+      message.warning('Only the host can create files in host-only mode');
+      return;
+    }
+    
     const parentNode = tree[parentNodeId];
     if (!parentNode || parentNode.type !== 'folder') {
       console.warn('Cannot create file in non-folder node');
@@ -1466,9 +1494,14 @@ const handleCreateFile = (parentNodeId = selectedNodeId || 'root') => {
       parentNodeId: parentNodeId,
       parentNode: parentNode
     });
-  };
+  }
 
-  const handleCreateFolder = (parentNodeId = selectedNodeId || 'root') => {
+ const handleCreateFolder = (parentNodeId = selectedNodeId || 'root') => {
+    if (!isOperationAllowed()) {
+      message.warning('Only the host can create folders in host-only mode');
+      return;
+    }
+    
     const parentNode = tree[parentNodeId];
     if (!parentNode || parentNode.type !== 'folder') {
       message.error('Cannot create folder in this location');
@@ -1498,6 +1531,11 @@ const handleCreateFile = (parentNodeId = selectedNodeId || 'root') => {
 
   // Rename handlers
   const handleRequestRename = (nodeId) => {
+    if (!isOperationAllowed()) {
+      message.warning('Only the host can rename items in host-only mode');
+      return;
+    }
+    
     const node = tree[nodeId];
     if (!node || nodeId === 'root') {
       message.error('Cannot rename root directory');
@@ -1524,6 +1562,11 @@ const handleCreateFile = (parentNodeId = selectedNodeId || 'root') => {
 
   // Delete handlers
   const handleRequestDelete = (nodeId) => {
+    if (!isOperationAllowed()) {
+      message.warning('Only the host can delete items in host-only mode');
+      return;
+    }
+    
     const node = tree[nodeId];
     if (!node) return;
 
@@ -1598,6 +1641,7 @@ const handleCreateFile = (parentNodeId = selectedNodeId || 'root') => {
               </div>
             </div>
             
+            
             <div className="search-section">
               <div className={`search-container ${isSearchFocused ? 'search-focused' : ''}`}>
                 <input
@@ -1614,24 +1658,34 @@ const handleCreateFile = (parentNodeId = selectedNodeId || 'root') => {
             </div>
           </div>
           
-          <div className="action-buttons">
-            <Tooltip title="New File" color="#0f172a">
-              <button 
-                onClick={() => handleCreateFile()}
-                className="action-button new-file-button"
-              >
-                <PlusOutlined className="button-icon" />
-              </button>
-            </Tooltip>
-            <Tooltip title="New Folder" color="#0f172a">
-              <button 
-                onClick={() => handleCreateFolder()}
-                className="action-button new-folder-button"
-              >
-                <FolderOutlined className="button-icon" />
-              </button>
-            </Tooltip>
-          </div>
+          
+
+<div className="action-buttons">
+  <Tooltip 
+    title={isOperationAllowed() ? "New File" : "Only host can create files"} 
+    color="#0f172a"
+  >
+    <button 
+      onClick={() => handleCreateFile()}
+      className={`action-button new-file-button ${!isOperationAllowed() ? 'opacity-50 cursor-not-allowed' : ''}`}
+      disabled={!isOperationAllowed()}
+    >
+      <PlusOutlined className="button-icon" />
+    </button>
+  </Tooltip>
+  <Tooltip 
+    title={isOperationAllowed() ? "New Folder" : "Only host can create folders"} 
+    color="#0f172a"
+  >
+    <button 
+      onClick={() => handleCreateFolder()}
+      className={`action-button new-folder-button ${!isOperationAllowed() ? 'opacity-50 cursor-not-allowed' : ''}`}
+      disabled={!isOperationAllowed()}
+    >
+      <FolderOutlined className="button-icon" />
+    </button>
+  </Tooltip>
+</div>
         </div>
         
         {/* File Tree Content */}
@@ -1662,6 +1716,7 @@ const handleCreateFile = (parentNodeId = selectedNodeId || 'root') => {
                 onRequestDelete={handleRequestDelete}
                 isDragging={isDragging}
                 onDragEnd={handleDragEnd}
+                isOperationAllowed={isOperationAllowed}
               />
             </div>
           )}
@@ -1716,6 +1771,7 @@ const handleCreateFile = (parentNodeId = selectedNodeId || 'root') => {
         onCreateFolder={handleCreateFolder}
         onRequestRename={handleRequestRename}
         onRequestDelete={handleRequestDelete}
+        editingMode={editingMode}
       />
 
       {/* Create Item Modal */}
