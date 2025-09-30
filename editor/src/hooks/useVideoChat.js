@@ -65,6 +65,7 @@ export const useVideoChat = (roomId, userName) => {
   const maxReconnectAttempts = 8;
   const performanceMonitorRef = useRef(null);
   const mediaInitializedRef = useRef(false);
+  const connectionAttemptsRef = useRef(new Map()); // Track connection attempts per peer
 
   // keep ref synchronized with state
   useEffect(() => {
@@ -203,22 +204,16 @@ export const useVideoChat = (roomId, userName) => {
     low: 'LOW'
   };
 
-  /**
-   * Set global video quality (affects local outgoing stream + requests SFU to change subscriptions)
-   * uiQuality: 'high' | 'medium' | 'low'
-   */
   const setGlobalVideoQuality = useCallback(async (uiQuality = 'medium') => {
     const profileKey = UI_TO_PROFILE[uiQuality] || 'MEDIUM';
     setVideoQuality(profileKey);
 
-    // optimize local outgoing streams to new profile (camera + screen)
     try {
       await optimizeAllVideoStreams(profileKey);
     } catch (err) {
       console.warn('[useVideoChat] optimizeAllVideoStreams failed', err);
     }
 
-    // notify server/SFU to change subscription/resolution for non-pinned tiles
     try {
       sendToServer?.({ type: 'set-quality', data: { scope: 'global', quality: profileKey } });
     } catch (err) {
@@ -227,21 +222,17 @@ export const useVideoChat = (roomId, userName) => {
   }, [optimizeAllVideoStreams, sendToServer]);
 
   const setPinnedVideoQuality = useCallback(async (peerId, uiQuality = 'high') => {
-    // If no peerId provided, treat as global
     if (!peerId) {
       return setGlobalVideoQuality(uiQuality);
     }
 
     const profileKey = UI_TO_PROFILE[uiQuality] || 'MEDIUM';
 
-    // If peerId === localPeerId, we are essentially asking ourselves.
-    // Apply local optimization immediately rather than asking the network to change us.
     if (peerId === localPeerId) {
       console.log('[useVideoChat] setPinnedVideoQuality for local peer — applying locally');
       try {
         await optimizeAllVideoStreams(profileKey);
         setVideoQuality(profileKey);
-        // send ack to server for UI feedback if you like
         sendToServer({ type: 'set-quality-done', data: { success: true, quality: profileKey } });
       } catch (err) {
         console.warn('[useVideoChat] local setPinnedVideoQuality failed', err);
@@ -250,10 +241,8 @@ export const useVideoChat = (roomId, userName) => {
       return;
     }
 
-    // Normal path: request the publisher (peerId) to change their outgoing encoding for us only
     try {
       sendToServer?.({ type: 'set-quality', to: peerId, data: { scope: 'pinned', quality: profileKey } });
-      // optionally wait for set-quality-done ack from publisher
     } catch (err) {
       console.warn('[useVideoChat] send set-quality(pinned) failed', err);
     }
@@ -264,21 +253,14 @@ export const useVideoChat = (roomId, userName) => {
     try {
       const peersIds = Array.from(peerConnectionsRef.current.keys());
       for (const pid of peersIds) {
-        // if we're the publisher and someone requests different quality for us,
-        // they'll send a request we already handle in 'set-quality-request' branch.
         if (pid === pinnedPeerId) {
-          // ask the publisher (the pinned peer) to send better quality to us
-          // (if publisher is remote). If pinned is local, we'll adjust our capture locally.
           if (pid !== localPeerId) {
             sendToServer?.({ type: 'set-quality', to: pid, data: { scope: 'pinned', quality: 'HIGH' } });
-            // also send the request variant — server may forward it differently
             sendToServer?.({ type: 'set-quality-request', to: pid, data: { quality: 'HIGH' } });
           } else {
-            // we are pinned to ourselves: bump our local capture for pinned experience
             try { await optimizeAllVideoStreams('HIGH'); setVideoQuality('HIGH'); } catch (e) { console.warn(e); }
           }
         } else {
-          // force unpinned connections to low (subscriber side asks publisher to lower outgoing resolution)
           sendToServer?.({ type: 'set-quality', to: pid, data: { scope: 'subscriber', quality: 'LOW' } });
           sendToServer?.({ type: 'set-quality-request', to: pid, data: { quality: 'LOW' } });
         }
@@ -288,12 +270,10 @@ export const useVideoChat = (roomId, userName) => {
     }
   }, [pinnedPeerId, localPeerId, optimizeAllVideoStreams, sendToServer]);
 
-  // --- add this near the other useEffects in useVideoChat ---
   useEffect(() => {
-    // Listen for UI-driven global/pinned quality requests using CustomEvent
     const onSetGlobal = (ev) => {
       try {
-        const uiQuality = ev?.detail?.quality || ev?.detail; // 'high'|'medium'|'low'
+        const uiQuality = ev?.detail?.quality || ev?.detail;
         if (!uiQuality) return;
         console.debug('[useVideoChat:event] set-global-quality', uiQuality);
         setGlobalVideoQuality(uiQuality);
@@ -305,14 +285,12 @@ export const useVideoChat = (roomId, userName) => {
     const onSetPinned = (ev) => {
       try {
         const uiQuality = ev?.detail?.quality || ev?.detail;
-        const peerId = ev?.detail?.peerId || ev?.detail?.to; // optional
+        const peerId = ev?.detail?.peerId || ev?.detail?.to;
         if (!uiQuality) return;
         console.debug('[useVideoChat:event] set-pinned-quality', { uiQuality, peerId });
         if (peerId) {
-          // request pinned quality change for a specific peer
           setPinnedVideoQuality(peerId, uiQuality);
         } else {
-          // if no peer provided, try to apply to pinnedPeerId
           if (pinnedPeerId) setPinnedVideoQuality(pinnedPeerId, uiQuality);
         }
       } catch (err) {
@@ -367,6 +345,7 @@ export const useVideoChat = (roomId, userName) => {
     }
     pendingRemoteDescriptions.current.delete(peerId);
     pendingIceCandidates.current.delete(peerId);
+    connectionAttemptsRef.current.delete(peerId);
     setPeers(prev => {
       const m = new Map(prev);
       m.delete(peerId);
@@ -409,7 +388,6 @@ export const useVideoChat = (roomId, userName) => {
     try {
       console.log('[useVideoChat] initializeMedia called with', { forceVideoOn, forceAudioOn, isCameraOn, isMicOn });
       
-      // Determine what media we need
       const needsVideo = forceVideoOn || isCameraOn;
       const needsAudio = forceAudioOn || isMicOn;
       
@@ -432,7 +410,6 @@ export const useVideoChat = (roomId, userName) => {
         return null;
       }
       
-      // Set track enabled states based on current toggle states
       stream.getAudioTracks().forEach(track => {
         track.enabled = isMicOn;
         console.log(`[useVideoChat] Audio track enabled: ${track.enabled} (state: ${isMicOn})`);
@@ -451,7 +428,6 @@ export const useVideoChat = (roomId, userName) => {
       
     } catch (err) {
       console.error('[useVideoChat] initializeMedia failed', err);
-      // Try with just audio if video fails
       if (constraints.video && constraints.audio) {
         try {
           console.log('[useVideoChat] Retrying with audio only');
@@ -464,7 +440,7 @@ export const useVideoChat = (roomId, userName) => {
           cameraStreamRef.current = audioStream;
           setLocalStream(audioStream);
           mediaInitializedRef.current = true;
-          setIsCameraOn(false); // Update state to reflect reality
+          setIsCameraOn(false);
           
           return audioStream;
         } catch (audioErr) {
@@ -472,7 +448,6 @@ export const useVideoChat = (roomId, userName) => {
         }
       }
       
-      // If all else fails, update states to reflect reality
       setIsMicOn(false);
       setIsCameraOn(false);
       mediaInitializedRef.current = true;
@@ -480,9 +455,10 @@ export const useVideoChat = (roomId, userName) => {
     }
   }, [videoQuality, isMicOn, isCameraOn]);
 
-  // createPeerConnection - FIXED VERSION with role-based negotiation
+  // FIXED: createPeerConnection with proper role management
   const createPeerConnection = useCallback((peerId, peerUserName, isInitiator = false) => {
     if (peerConnectionsRef.current.has(peerId)) {
+      console.log(`[PC] Reusing existing connection for ${peerId}`);
       if (peerUserName) {
         setPeers(prev => {
           const m = new Map(prev);
@@ -498,6 +474,7 @@ export const useVideoChat = (roomId, userName) => {
     const pc = new RTCPeerConnection(ICE_SERVERS);
     pc.__peerId = peerId;
     pc.__isInitiator = isInitiator;
+    pc.__connectionAttempts = 0;
 
     // Configure bandwidth limits
     const configureBandwidth = () => {
@@ -518,7 +495,7 @@ export const useVideoChat = (roomId, userName) => {
       }
     };
 
-    // Only initiate negotiation if we're the initiator
+    // FIXED: Only initiate negotiation if we're the initiator AND in stable state
     pc.onnegotiationneeded = async () => {
       try {
         if (pc.signalingState !== 'stable' || !pc.__isInitiator) {
@@ -526,7 +503,14 @@ export const useVideoChat = (roomId, userName) => {
           return;
         }
         
-        console.log(`[PC] negotiation needed for ${peerId} (initiator)`);
+        // Limit connection attempts to prevent infinite loops
+        if (pc.__connectionAttempts >= 3) {
+          console.warn(`[PC] Max connection attempts reached for ${peerId}`);
+          return;
+        }
+        pc.__connectionAttempts++;
+        
+        console.log(`[PC] negotiation needed for ${peerId} (initiator, attempt ${pc.__connectionAttempts})`);
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         configureBandwidth();
@@ -577,6 +561,7 @@ export const useVideoChat = (roomId, userName) => {
       if (pc.connectionState === 'connected') {
         setConnectionStatus('connected');
         configureBandwidth();
+        pc.__connectionAttempts = 0; // Reset attempts on successful connection
       }
     };
 
@@ -585,7 +570,7 @@ export const useVideoChat = (roomId, userName) => {
       if (pc.iceConnectionState === 'failed') {
         console.warn(`[PC] ICE connection failed for ${peerId}, restarting ICE`);
         try {
-          if (pc.signalingState === 'stable' && pc.__isInitiator) {
+          if (pc.signalingState === 'stable' && pc.__isInitiator && pc.__connectionAttempts < 3) {
             pc.createOffer().then(offer => {
               pc.setLocalDescription(offer);
               configureBandwidth();
@@ -635,17 +620,15 @@ export const useVideoChat = (roomId, userName) => {
     return pc;
   }, [sendToServer, isScreenSharing, videoQuality]);
 
-  // WebSocket connection management
+  // FIXED: WebSocket connection management with proper signaling
   const setupWebSocket = useCallback(() => {
     if (!roomId || typeof userName !== 'string' || userName.trim() === '' || !isMountedRef.current) return;
 
-    // Initialize room tracking
     if (!activeConnections.has(roomId)) {
       activeConnections.set(roomId, new Set());
     }
     const roomConnections = activeConnections.get(roomId);
 
-    // If we already have an active connection for this room, don't create a new one
     if (roomConnections.size > 0) {
       console.debug('[WS] already have active connection for room', roomId, 'skipping new connection');
       return;
@@ -657,7 +640,6 @@ export const useVideoChat = (roomId, userName) => {
 
     console.log('[useVideoChat] opening ws', wsUrl);
 
-    // Close existing connection if any
     if (wsRef.current) {
       try { 
         wsRef.current.onclose = null;
@@ -688,6 +670,7 @@ export const useVideoChat = (roomId, userName) => {
       }
     };
 
+    // FIXED: WebSocket message handler with proper signaling state management
     ws.onmessage = async (evt) => {
       if (!isMountedRef.current) return;
       
@@ -710,20 +693,60 @@ export const useVideoChat = (roomId, userName) => {
 
           case 'user-list':
             console.log('[WS] received user list:', message.users);
-            // Limit simultaneous connection attempts
-            const usersToConnect = message.users.slice(0, 8); // Max 8 simultaneous connections
+            // For existing users, we become the ANSWERER (not initiator)
+            const usersToConnect = message.users.slice(0, 8);
             for (const u of usersToConnect) {
-              createPeerConnection(u.userId, u.userName, true);
+              if (!peerConnectionsRef.current.has(u.userId)) {
+                createPeerConnection(u.userId, u.userName, false); // We are answerer
+                console.log(`[WS] Created passive connection for existing user ${u.userId} (waiting for their offer)`);
+              }
             }
             break;
 
           case 'join':
             console.log('[WS] peer joined:', from, peerUserName);
-            // Limit total connections
-            if (peerConnectionsRef.current.size < 12) {
-              createPeerConnection(from, peerUserName, false);
+            // For new users joining, WE become the OFFERER
+            if (peerConnectionsRef.current.size < 12 && !peerConnectionsRef.current.has(from)) {
+              const pc = createPeerConnection(from, peerUserName, true); // We are offerer
+              console.log(`[WS] Created active connection for new user ${from} (we are offerer)`);
+              
+              // The negotiation will be triggered automatically by onnegotiationneeded
+              // due to adding tracks, but we can trigger it manually if needed
+              setTimeout(() => {
+                if (pc.signalingState === 'stable' && pc.__isInitiator) {
+                  pc.createOffer().then(offer => {
+                    pc.setLocalDescription(offer);
+                    sendToServer({ type: 'offer', to: from, data: offer });
+                    console.log(`[WS] Sent initial offer to new user ${from}`);
+                  }).catch(err => {
+                    console.warn('[WS] Initial offer creation failed', err);
+                  });
+                }
+              }, 500);
             } else {
               console.warn('[WS] connection limit reached, ignoring new peer');
+            }
+            break;
+
+          case 'create-offer':
+            console.log('[WS] create-offer request from', from);
+            // An existing peer is requesting us to create an offer for them
+            if (!peerConnectionsRef.current.has(from)) {
+              const pc = createPeerConnection(from, peerUserName, true); // We become initiator
+              console.log(`[WS] Created peer connection for ${from} in response to create-offer`);
+              
+              // Trigger offer creation
+              setTimeout(() => {
+                if (pc.signalingState === 'stable' && pc.__isInitiator) {
+                  pc.createOffer().then(offer => {
+                    pc.setLocalDescription(offer);
+                    sendToServer({ type: 'offer', to: from, data: offer });
+                    console.log(`[WS] Sent offer to ${from} in response to create-offer`);
+                  }).catch(err => {
+                    console.warn('[WS] create-offer offer creation failed', err);
+                  });
+                }
+              }, 100);
             }
             break;
 
@@ -732,11 +755,15 @@ export const useVideoChat = (roomId, userName) => {
             const pc = peerConnectionsRef.current.get(from) || createPeerConnection(from, peerUserName, false);
             
             try {
-              // Check if we already have a local description (meaning we made an offer too)
+              // FIXED: Handle glare condition - if we also made an offer, be polite and roll back
               if (pc.localDescription && pc.localDescription.type === 'offer') {
                 console.log('[WS] glare detected - we also made an offer, being polite and rolling back');
-                await pc.setLocalDescription({ type: 'rollback' });
-                await new Promise(resolve => setTimeout(resolve, 100)); // Small delay
+                try {
+                  await pc.setLocalDescription({ type: 'rollback' });
+                  await new Promise(resolve => setTimeout(resolve, 100));
+                } catch (rollbackErr) {
+                  console.warn('[WS] rollback failed, continuing anyway', rollbackErr);
+                }
               }
               
               await pc.setRemoteDescription(new RTCSessionDescription(data));
@@ -749,101 +776,14 @@ export const useVideoChat = (roomId, userName) => {
 
             } catch (err) {
               console.error('[WS] offer handling failed', err);
-              // Send negotiation failed message to trigger retry
-              sendToServer({ type: 'negotiation-failed', to: from });
-            }
-            break;
-          }
-
-          // inside ws.onmessage switch(type) { ... add:
-
-          case 'set-quality-request': {
-            try {
-              const requesterId = from; // the peer who asked for a change
-              const qualityKey = (message.data && message.data.quality) || 'MEDIUM';
-              console.log('[useVideoChat] received set-quality-request from', requesterId, '->', qualityKey);
-
-              const pc = peerConnectionsRef.current.get(requesterId);
-
-              // Preferred: adjust the RTP sender parameters that send video to requester
-              let adjusted = false;
-              if (pc) {
-                const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
-                if (sender && typeof sender.getParameters === 'function' && typeof sender.setParameters === 'function') {
-                  const profile = VIDEO_PROFILES[qualityKey] || VIDEO_PROFILES.MEDIUM;
-                  try {
-                    const params = sender.getParameters() || {};
-                    if (!params.encodings) params.encodings = [{}];
-                    params.encodings[0].maxBitrate = profile.bitrate;
-                    // optional: set scaleResolutionDownBy if supported: params.encodings[0].scaleResolutionDownBy = ...
-                    sender.setParameters(params).then(() => {
-                      console.log(`[useVideoChat] adjusted sender parameters for ${requesterId} -> ${qualityKey} (${profile.bitrate})`);
-                    }).catch(err => {
-                      console.warn('[useVideoChat] sender.setParameters failed', err);
-                    });
-                    adjusted = true;
-                  } catch (err) {
-                    console.warn('[useVideoChat] setParameters thrown', err);
-                  }
+              // Clean up and retry with reversed roles
+              cleanupPeerConnection(from);
+              setTimeout(() => {
+                if (isMountedRef.current) {
+                  const retryPc = createPeerConnection(from, peerUserName, true);
+                  console.log(`[WS] Retrying connection to ${from} as initiator after offer failure`);
                 }
-              }
-
-              // Fallback: try to lower our capture constraints (reduces outgoing bandwidth for everyone)
-              if (!adjusted && cameraStreamRef.current) {
-                const profile = VIDEO_PROFILES[qualityKey] || VIDEO_PROFILES.MEDIUM;
-                try {
-                  const vTracks = cameraStreamRef.current.getVideoTracks();
-                  for (const t of vTracks) {
-                    if (typeof t.applyConstraints === 'function') {
-                      await t.applyConstraints({
-                        width: { ideal: profile.width },
-                        height: { ideal: profile.height },
-                        frameRate: { ideal: profile.frameRate }
-                      });
-                    }
-                  }
-                  console.log('[useVideoChat] applied fallback capture constraints for quality', qualityKey);
-                  adjusted = true;
-                } catch (err) {
-                  console.warn('[useVideoChat] applyConstraints fallback failed', err);
-                }
-              }
-
-              // If still not adjusted, try to replace senders with lower-resolution track (best-effort)
-              if (!adjusted && cameraStreamRef.current) {
-                try {
-                  // Try getUserMedia with lower constraints and replaceTrack
-                  const profile = VIDEO_PROFILES[qualityKey] || VIDEO_PROFILES.MEDIUM;
-                  const low = await navigator.mediaDevices.getUserMedia({
-                    video: { width: { ideal: profile.width }, height: { ideal: profile.height }, frameRate: { ideal: profile.frameRate } },
-                    audio: false
-                  });
-                  const lowTrack = low.getVideoTracks()[0];
-                  if (lowTrack) {
-                    for (const [peerId, pcItem] of peerConnectionsRef.current.entries()) {
-                      const sender = pcItem.getSenders().find(s => s.track && s.track.kind === 'video');
-                      if (sender) {
-                        try { await sender.replaceTrack(lowTrack); } catch (replaceErr) { console.warn('replaceTrack fallback failed', replaceErr); }
-                      }
-                    }
-                  }
-                  // stop low track after use (we only used to replace for a moment)
-                  setTimeout(() => {
-                    try { low.getTracks().forEach(t => t.stop()); } catch (e) {}
-                  }, 1000);
-                  adjusted = true;
-                } catch (err) {
-                  console.warn('[useVideoChat] replaceTrack fallback failed', err);
-                }
-              }
-
-              // Optionally notify the requester that we've adjusted (so their UI can show done)
-              try {
-                sendToServer({ type: 'set-quality-done', to: requesterId, data: { success: !!adjusted, quality: qualityKey }});
-              } catch (e) { /* ignore */ }
-
-            } catch (err) {
-              console.warn('[useVideoChat] set-quality-request handling error', err);
+              }, 1000);
             }
             break;
           }
@@ -857,7 +797,7 @@ export const useVideoChat = (roomId, userName) => {
             }
 
             try {
-              // Only set remote description if we're in the right state
+              // FIXED: Only set remote description if we're in the right state
               if (pc.signalingState === 'have-local-offer') {
                 await pc.setRemoteDescription(new RTCSessionDescription(data));
                 console.log(`[WS] applied remote answer for ${from}`);
@@ -869,7 +809,10 @@ export const useVideoChat = (roomId, userName) => {
                   const queuedAnswer = pendingRemoteDescriptions.current.get(from);
                   if (queuedAnswer && pc.signalingState === 'have-local-offer') {
                     pc.setRemoteDescription(new RTCSessionDescription(queuedAnswer))
-                      .then(() => pendingRemoteDescriptions.current.delete(from))
+                      .then(() => {
+                        pendingRemoteDescriptions.current.delete(from);
+                        console.log(`[WS] applied queued answer for ${from}`);
+                      })
                       .catch(err => console.warn('[WS] queued answer apply failed', err));
                   }
                 }, 1000);
@@ -914,6 +857,64 @@ export const useVideoChat = (roomId, userName) => {
             break;
           }
 
+          case 'set-quality-request': {
+            try {
+              const requesterId = from;
+              const qualityKey = (message.data && message.data.quality) || 'MEDIUM';
+              console.log('[useVideoChat] received set-quality-request from', requesterId, '->', qualityKey);
+
+              const pc = peerConnectionsRef.current.get(requesterId);
+
+              let adjusted = false;
+              if (pc) {
+                const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+                if (sender && typeof sender.getParameters === 'function' && typeof sender.setParameters === 'function') {
+                  const profile = VIDEO_PROFILES[qualityKey] || VIDEO_PROFILES.MEDIUM;
+                  try {
+                    const params = sender.getParameters() || {};
+                    if (!params.encodings) params.encodings = [{}];
+                    params.encodings[0].maxBitrate = profile.bitrate;
+                    sender.setParameters(params).then(() => {
+                      console.log(`[useVideoChat] adjusted sender parameters for ${requesterId} -> ${qualityKey} (${profile.bitrate})`);
+                    }).catch(err => {
+                      console.warn('[useVideoChat] sender.setParameters failed', err);
+                    });
+                    adjusted = true;
+                  } catch (err) {
+                    console.warn('[useVideoChat] setParameters thrown', err);
+                  }
+                }
+              }
+
+              if (!adjusted && cameraStreamRef.current) {
+                const profile = VIDEO_PROFILES[qualityKey] || VIDEO_PROFILES.MEDIUM;
+                try {
+                  const vTracks = cameraStreamRef.current.getVideoTracks();
+                  for (const t of vTracks) {
+                    if (typeof t.applyConstraints === 'function') {
+                      await t.applyConstraints({
+                        width: { ideal: profile.width },
+                        height: { ideal: profile.height },
+                        frameRate: { ideal: profile.frameRate }
+                      });
+                    }
+                  }
+                  console.log('[useVideoChat] applied fallback capture constraints for quality', qualityKey);
+                  adjusted = true;
+                } catch (err) {
+                  console.warn('[useVideoChat] applyConstraints fallback failed', err);
+                }
+              }
+
+              try {
+                sendToServer({ type: 'set-quality-done', to: requesterId, data: { success: !!adjusted, quality: qualityKey }});
+              } catch (e) { }
+            } catch (err) {
+              console.warn('[useVideoChat] set-quality-request handling error', err);
+            }
+            break;
+          }
+
           case 'media-update': {
             setPeers(prev => {
               const m = new Map(prev);
@@ -942,9 +943,12 @@ export const useVideoChat = (roomId, userName) => {
           case 'negotiation-failed': {
             console.warn('[WS] negotiation failed with', from, 'recreating connection');
             cleanupPeerConnection(from);
-            // Retry connection but reverse roles
-            const wasInitiator = peerConnectionsRef.current.get(from)?.__isInitiator;
-            createPeerConnection(from, peerUserName, !wasInitiator);
+            setTimeout(() => {
+              if (isMountedRef.current && !peerConnectionsRef.current.has(from)) {
+                createPeerConnection(from, peerUserName, true);
+                console.log(`[WS] Retrying connection to ${from} after negotiation failure`);
+              }
+            }, 1000);
             break;
           }
 
@@ -962,7 +966,6 @@ export const useVideoChat = (roomId, userName) => {
       console.log('[WS] closed', ev.code, ev.reason);
       setConnectionStatus('disconnected');
       
-      // Remove from global tracking
       if (connectionIdRef.current && activeConnections.has(roomId)) {
         const roomConnections = activeConnections.get(roomId);
         roomConnections.delete(connectionIdRef.current);
@@ -971,7 +974,6 @@ export const useVideoChat = (roomId, userName) => {
         }
       }
 
-      // Attempt reconnection
       if (isMountedRef.current && reconnectAttemptsRef.current < maxReconnectAttempts) {
         reconnectAttemptsRef.current++;
         const delay = Math.min(5000, reconnectAttemptsRef.current * 1000);
@@ -1023,7 +1025,6 @@ export const useVideoChat = (roomId, userName) => {
           return;
         }
         
-        // Add tracks to existing peer connections
         for (const [peerId, pc] of peerConnectionsRef.current.entries()) {
           try {
             stream.getTracks().forEach(track => {
@@ -1042,7 +1043,6 @@ export const useVideoChat = (roomId, userName) => {
       }
     };
     
-    // Only initialize once when component mounts
     if (!mediaInitializedRef.current) {
       initMedia();
     }
@@ -1050,7 +1050,7 @@ export const useVideoChat = (roomId, userName) => {
     return () => { 
       cancelled = true; 
     };
-  }, []); // Empty dependency array - only run once
+  }, []);
 
   // When localStream changes, add tracks to existing PCs
   useEffect(() => {
@@ -1061,7 +1061,6 @@ export const useVideoChat = (roomId, userName) => {
     const currentStream = isScreenSharing && screenStreamRef.current ? screenStreamRef.current : cameraStreamRef.current;
     if (!currentStream) return;
     
-    // Update track enabled states based on current settings
     currentStream.getAudioTracks().forEach(track => {
       try { 
         track.enabled = isMicOn;
@@ -1089,7 +1088,7 @@ export const useVideoChat = (roomId, userName) => {
     }
   }, [localStream, isScreenSharing, isMicOn, isCameraOn]);
 
-  // Adaptive pinned quality: measure inbound bitrate to decide HIGH/LOW for pinned
+  // Adaptive pinned quality
   useEffect(() => {
     let iv = null;
     let lastBytes = 0;
@@ -1100,13 +1099,11 @@ export const useVideoChat = (roomId, userName) => {
         if (!pinnedPeerId) return;
         const pc = peerConnectionsRef.current.get(pinnedPeerId);
         if (!pc || typeof pc.getStats !== 'function') {
-          // No direct pc (maybe not connected yet) - still enforce unpinned low
           await enforceUnpinnedLow();
           return;
         }
 
         const stats = await pc.getStats();
-        // find inbound-rtp for video
         let inbound;
         stats.forEach(report => {
           if (report.type === 'inbound-rtp' && (report.kind === 'video' || report.mediaType === 'video')) {
@@ -1115,7 +1112,6 @@ export const useVideoChat = (roomId, userName) => {
         });
 
         if (!inbound) {
-          // nothing to measure yet
           await enforceUnpinnedLow();
           return;
         }
@@ -1126,15 +1122,12 @@ export const useVideoChat = (roomId, userName) => {
         if (lastTs && nowTs > lastTs) {
           const deltaBytes = nowBytes - lastBytes;
           const deltaSec = (nowTs - lastTs) / 1000;
-          const bps = deltaSec > 0 ? (deltaBytes * 8) / deltaSec : 0; // bits per second
+          const bps = deltaSec > 0 ? (deltaBytes * 8) / deltaSec : 0;
 
-          // thresholds (tunable): if inbound to pinned > 200kbps => HIGH, else LOW
-          const THRESH_HIGH = 200 * 1000; // 200 kbps
+          const THRESH_HIGH = 200 * 1000;
           const desired = bps >= THRESH_HIGH ? 'HIGH' : 'LOW';
 
-          // Request publisher to change encoding for this subscriber (us)
           if (pinnedPeerId === localPeerId) {
-            // we pinned ourselves — ensure our outgoing capture quality is adjusted
             if (desired === 'HIGH') {
               await optimizeAllVideoStreams('HIGH');
               setVideoQuality('HIGH');
@@ -1143,12 +1136,10 @@ export const useVideoChat = (roomId, userName) => {
               setVideoQuality('LOW');
             }
           } else {
-            // ask the remote publisher to change for our subscription
             sendToServer?.({ type: 'set-quality', to: pinnedPeerId, data: { scope: 'pinned', quality: desired } });
             sendToServer?.({ type: 'set-quality-request', to: pinnedPeerId, data: { quality: desired } });
           }
 
-          // Always keep all others on LOW
           await enforceUnpinnedLow();
         }
 
@@ -1159,9 +1150,7 @@ export const useVideoChat = (roomId, userName) => {
       }
     };
 
-    // start sampling at a modest interval
     iv = setInterval(samplePinned, 3000);
-    // run one immediately
     samplePinned();
 
     return () => {
@@ -1169,9 +1158,7 @@ export const useVideoChat = (roomId, userName) => {
     };
   }, [pinnedPeerId, localPeerId, enforceUnpinnedLow, optimizeAllVideoStreams, sendToServer]);
 
-  // Whenever connections change or pinned changes, enforce unpinned low quality
   useEffect(() => {
-    // short debounce to avoid spamming on quick connect churn
     const t = setTimeout(() => {
       enforceUnpinnedLow();
     }, 200);
@@ -1181,13 +1168,11 @@ export const useVideoChat = (roomId, userName) => {
   // screen share toggle
   const handleToggleScreenShare = useCallback(async () => {
     if (isScreenSharing) {
-      // Stop screen sharing and revert to camera
       if (screenStreamRef.current) {
         screenStreamRef.current.getTracks().forEach(track => track.stop());
         screenStreamRef.current = null;
       }
       
-      // Switch back to camera stream for local preview
       if (cameraStreamRef.current) {
         setLocalStream(cameraStreamRef.current);
         await replaceVideoTrack(cameraStreamRef.current.getVideoTracks()[0]);
@@ -1221,7 +1206,6 @@ export const useVideoChat = (roomId, userName) => {
     }
   }, [isScreenSharing, sendToServer, replaceVideoTrack]);
 
-  // Get the appropriate stream for local display
   const getDisplayStream = useCallback(() => {
     if (isScreenSharing && screenStreamRef.current) {
       return screenStreamRef.current;
@@ -1229,36 +1213,30 @@ export const useVideoChat = (roomId, userName) => {
     return cameraStreamRef.current;
   }, [isScreenSharing]);
 
-  // FIXED: Toggle functions that handle media acquisition properly
   const toggleMic = useCallback(async () => {
     console.log('[useVideoChat] toggleMic called, current state:', isMicOn);
     
     const newState = !isMicOn;
     setIsMicOn(newState);
     
-    // If we don't have a stream or need to enable audio, get media
     if (!cameraStreamRef.current || (newState && !cameraStreamRef.current.getAudioTracks().length)) {
       console.log('[useVideoChat] Need to acquire media for mic toggle');
       try {
         const stream = await initializeMedia(isCameraOn, newState);
         if (stream) {
-          // Replace audio track for all peers
           const audioTrack = stream.getAudioTracks()[0];
           if (audioTrack) {
             await replaceAudioTrack(audioTrack);
           }
           
-          // Send media update
           sendToServer({ type: 'media-update', data: { isMicOn: newState, isCameraOn } });
         }
       } catch (err) {
         console.error('[useVideoChat] Failed to acquire media for mic toggle', err);
-        // Revert state if acquisition failed
         setIsMicOn(!newState);
         return;
       }
     } else {
-      // We have a stream, just toggle the track
       cameraStreamRef.current.getAudioTracks().forEach(track => {
         try { 
           track.enabled = newState;
@@ -1276,29 +1254,24 @@ export const useVideoChat = (roomId, userName) => {
     const newState = !isCameraOn;
     setIsCameraOn(newState);
     
-    // If we don't have a stream or need to enable video, get media
     if (!cameraStreamRef.current || (newState && !cameraStreamRef.current.getVideoTracks().length)) {
       console.log('[useVideoChat] Need to acquire media for camera toggle');
       try {
         const stream = await initializeMedia(newState, isMicOn);
         if (stream) {
-          // Replace video track for all peers
           const videoTrack = stream.getVideoTracks()[0];
           if (videoTrack) {
             await replaceVideoTrack(videoTrack);
           }
           
-          // Send media update
           sendToServer({ type: 'media-update', data: { isCameraOn: newState, isMicOn } });
         }
       } catch (err) {
         console.error('[useVideoChat] Failed to acquire media for camera toggle', err);
-        // Revert state if acquisition failed
         setIsCameraOn(!newState);
         return;
       }
     } else {
-      // We have a stream, just toggle the track
       cameraStreamRef.current.getVideoTracks().forEach(track => {
         try { 
           track.enabled = newState;
