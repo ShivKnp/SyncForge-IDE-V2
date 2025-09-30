@@ -258,7 +258,6 @@ const TerminalPanel = ({ sessionId, visible = false, workingDir = '', onToggle, 
     <div
       className="bottom"
       style={{
-        maxWidth: 1400,
         borderRadius: '8px 8px 0 0',
         background: '#0b1220',
         borderTop: '1px solid rgba(255,255,255,0.04)',
@@ -331,3 +330,4 @@ const TerminalPanel = ({ sessionId, visible = false, workingDir = '', onToggle, 
 };
 
 export default TerminalPanel;
+
