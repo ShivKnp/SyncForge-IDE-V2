@@ -1,7 +1,5 @@
 # SyncForge - Real-time Collaborative IDE
 
-http://googleusercontent.com/image_generation_content/0
-
 <div align="center">
 
 **A full-stack, real-time collaborative IDE designed for remote pair programming, technical interviews, and educational purposes. Code together, ship faster.**
