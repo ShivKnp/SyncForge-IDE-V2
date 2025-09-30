@@ -501,6 +501,8 @@ const CollapsibleSidebar = ({
                       onFileClick={actions.handleTabChange}
                       activeFileId={state.activeFileId}
                       onMoveNode={actions.moveNode}
+                      editingMode={state.config?.editing || 'open'} // Pass editing mode
+  isHost={state.isHost} // Pass host status
                       
                     />
                   </div>
