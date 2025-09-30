@@ -653,22 +653,37 @@ export const useVideoChat = (roomId, userName) => {
     connectionIdRef.current = Date.now() + Math.random().toString(36).substr(2, 9);
     roomConnections.add(connectionIdRef.current);
 
-    ws.onopen = () => {
-      if (!isMountedRef.current) {
-        ws.close();
-        return;
-      }
-      console.log('[WS] connected successfully');
-      setConnectionStatus('connected');
-      reconnectAttemptsRef.current = 0;
-      
-      try { 
-        ws.send(JSON.stringify({ type: 'join', name: userName })); 
-        ws.send(JSON.stringify({ type: 'media-update', data: { audio: isMicOn, video: isCameraOn } }));
-      } catch (e) {
-        console.warn('[WS] failed to send join message', e);
-      }
-    };
+   ws.onopen = () => {
+  if (!isMountedRef.current) {
+    ws.close();
+    return;
+  }
+  console.log('[WS] connected successfully');
+  setConnectionStatus('connected');
+  reconnectAttemptsRef.current = 0;
+  
+  try { 
+    // Send join first
+    ws.send(JSON.stringify({ type: 'join', name: userName })); 
+    
+    // CRITICAL: Send media state immediately after join
+    // This must happen AFTER we have initialized media
+    setTimeout(() => {
+      const mediaState = {
+        isMicOn: isMicOn,
+        isCameraOn: isCameraOn,
+        isScreenSharing: isScreenSharing
+      };
+      console.log('[WS] Sending initial media state:', mediaState);
+      ws.send(JSON.stringify({ 
+        type: 'media-update', 
+        data: mediaState 
+      }));
+    }, 100);
+  } catch (e) {
+    console.warn('[WS] failed to send join message', e);
+  }
+};
 
     // FIXED: WebSocket message handler with proper signaling state management
     ws.onmessage = async (evt) => {
@@ -692,41 +707,66 @@ export const useVideoChat = (roomId, userName) => {
             break;
 
           case 'user-list':
-            console.log('[WS] received user list:', message.users);
-            // For existing users, we become the ANSWERER (not initiator)
-            const usersToConnect = message.users.slice(0, 8);
-            for (const u of usersToConnect) {
-              if (!peerConnectionsRef.current.has(u.userId)) {
-                createPeerConnection(u.userId, u.userName, false); // We are answerer
-                console.log(`[WS] Created passive connection for existing user ${u.userId} (waiting for their offer)`);
-              }
-            }
-            break;
+  console.log('[WS] received user list:', message.users);
+  // Store user info but DON'T create connections yet
+  // Wait for them to send us offers (they are the initiators)
+  message.users.forEach(u => {
+    setPeers(prev => {
+      const m = new Map(prev);
+      if (!m.has(u.userId)) {
+        m.set(u.userId, {
+          id: u.userId,
+          userName: u.userName,
+          stream: new MediaStream(),
+          hasVideo: false,
+          hasAudio: false,
+          isMicOn: u.mediaState?.isMicOn || false,
+          isCameraOn: u.mediaState?.isCameraOn || false,
+          isScreenSharing: u.mediaState?.isScreenSharing || false
+        });
+      }
+      return m;
+    });
+  });
+  break;
 
           case 'join':
-            console.log('[WS] peer joined:', from, peerUserName);
-            // For new users joining, WE become the OFFERER
-            if (peerConnectionsRef.current.size < 12 && !peerConnectionsRef.current.has(from)) {
-              const pc = createPeerConnection(from, peerUserName, true); // We are offerer
-              console.log(`[WS] Created active connection for new user ${from} (we are offerer)`);
-              
-              // The negotiation will be triggered automatically by onnegotiationneeded
-              // due to adding tracks, but we can trigger it manually if needed
-              setTimeout(() => {
-                if (pc.signalingState === 'stable' && pc.__isInitiator) {
-                  pc.createOffer().then(offer => {
-                    pc.setLocalDescription(offer);
-                    sendToServer({ type: 'offer', to: from, data: offer });
-                    console.log(`[WS] Sent initial offer to new user ${from}`);
-                  }).catch(err => {
-                    console.warn('[WS] Initial offer creation failed', err);
-                  });
-                }
-              }, 500);
-            } else {
-              console.warn('[WS] connection limit reached, ignoring new peer');
-            }
-            break;
+  console.log('[WS] peer joined:', from, peerUserName, 'mediaState:', message.mediaState);
+  
+  // Update or create peer entry with media state
+  setPeers(prev => {
+    const m = new Map(prev);
+    const existing = m.get(from) || {};
+    m.set(from, {
+      ...existing,
+      id: from,
+      userName: peerUserName,
+      isMicOn: message.mediaState?.isMicOn || false,
+      isCameraOn: message.mediaState?.isCameraOn || false,
+      isScreenSharing: message.mediaState?.isScreenSharing || false
+    });
+    return m;
+  });
+  
+  // Create connection and initiate offer
+  if (peerConnectionsRef.current.size < 12 && !peerConnectionsRef.current.has(from)) {
+    const pc = createPeerConnection(from, peerUserName, true);
+    console.log(`[WS] Created active connection for new user ${from} (we are offerer)`);
+    
+    // Wait for tracks to be added, then create offer
+    setTimeout(() => {
+      if (pc.signalingState === 'stable' && pc.__isInitiator) {
+        pc.createOffer().then(offer => {
+          pc.setLocalDescription(offer);
+          sendToServer({ type: 'offer', to: from, data: offer });
+          console.log(`[WS] Sent initial offer to new user ${from}`);
+        }).catch(err => {
+          console.warn('[WS] Initial offer creation failed', err);
+        });
+      }
+    }, 500);
+  }
+  break;
 
           case 'create-offer':
             console.log('[WS] create-offer request from', from);
@@ -915,15 +955,123 @@ export const useVideoChat = (roomId, userName) => {
             break;
           }
 
-          case 'media-update': {
-            setPeers(prev => {
-              const m = new Map(prev);
-              const existing = m.get(from) || {};
-              m.set(from, { ...existing, ...data });
-              return m;
-            });
-            break;
-          }
+          
+// Key fixes in useVideoChat.js
+
+// 1. Fix WebSocket setup to send media state immediately after join
+ws.onopen = () => {
+  if (!isMountedRef.current) {
+    ws.close();
+    return;
+  }
+  console.log('[WS] connected successfully');
+  setConnectionStatus('connected');
+  reconnectAttemptsRef.current = 0;
+  
+  try { 
+    // Send join first
+    ws.send(JSON.stringify({ type: 'join', name: userName })); 
+    
+    // CRITICAL: Send media state immediately after join
+    // This must happen AFTER we have initialized media
+    setTimeout(() => {
+      const mediaState = {
+        isMicOn: isMicOn,
+        isCameraOn: isCameraOn,
+        isScreenSharing: isScreenSharing
+      };
+      console.log('[WS] Sending initial media state:', mediaState);
+      ws.send(JSON.stringify({ 
+        type: 'media-update', 
+        data: mediaState 
+      }));
+    }, 100);
+  } catch (e) {
+    console.warn('[WS] failed to send join message', e);
+  }
+};
+
+// 2. Fix user-list handler to wait for remote offers instead of creating connections immediately
+case 'user-list':
+  console.log('[WS] received user list:', message.users);
+  // Store user info but DON'T create connections yet
+  // Wait for them to send us offers (they are the initiators)
+  message.users.forEach(u => {
+    setPeers(prev => {
+      const m = new Map(prev);
+      if (!m.has(u.userId)) {
+        m.set(u.userId, {
+          id: u.userId,
+          userName: u.userName,
+          stream: new MediaStream(),
+          hasVideo: false,
+          hasAudio: false,
+          isMicOn: u.mediaState?.isMicOn || false,
+          isCameraOn: u.mediaState?.isCameraOn || false,
+          isScreenSharing: u.mediaState?.isScreenSharing || false
+        });
+      }
+      return m;
+    });
+  });
+  break;
+
+// 3. Fix join handler to update peer state with media info
+case 'join':
+  console.log('[WS] peer joined:', from, peerUserName, 'mediaState:', message.mediaState);
+  
+  // Update or create peer entry with media state
+  setPeers(prev => {
+    const m = new Map(prev);
+    const existing = m.get(from) || {};
+    m.set(from, {
+      ...existing,
+      id: from,
+      userName: peerUserName,
+      isMicOn: message.mediaState?.isMicOn || false,
+      isCameraOn: message.mediaState?.isCameraOn || false,
+      isScreenSharing: message.mediaState?.isScreenSharing || false
+    });
+    return m;
+  });
+  
+  // Create connection and initiate offer
+  if (peerConnectionsRef.current.size < 12 && !peerConnectionsRef.current.has(from)) {
+    const pc = createPeerConnection(from, peerUserName, true);
+    console.log(`[WS] Created active connection for new user ${from} (we are offerer)`);
+    
+    // Wait for tracks to be added, then create offer
+    setTimeout(() => {
+      if (pc.signalingState === 'stable' && pc.__isInitiator) {
+        pc.createOffer().then(offer => {
+          pc.setLocalDescription(offer);
+          sendToServer({ type: 'offer', to: from, data: offer });
+          console.log(`[WS] Sent initial offer to new user ${from}`);
+        }).catch(err => {
+          console.warn('[WS] Initial offer creation failed', err);
+        });
+      }
+    }, 500);
+  }
+  break;
+
+// 4. Fix media-update handler to properly update remote peer state
+case 'media-update': {
+  console.log('[WS] media-update from', from, 'data:', data);
+  setPeers(prev => {
+    const m = new Map(prev);
+    const existing = m.get(from) || {};
+    m.set(from, { 
+      ...existing,
+      id: from,
+      isMicOn: data.isMicOn !== undefined ? data.isMicOn : existing.isMicOn,
+      isCameraOn: data.isCameraOn !== undefined ? data.isCameraOn : existing.isCameraOn,
+      isScreenSharing: data.isScreenSharing !== undefined ? data.isScreenSharing : existing.isScreenSharing
+    });
+    return m;
+  });
+  break;
+}
 
           case 'leave': {
             console.log('[WS] peer left', from);
@@ -1008,49 +1156,59 @@ export const useVideoChat = (roomId, userName) => {
 
   // FIXED: Media acquisition with proper initialization
   useEffect(() => {
-    let cancelled = false;
+  let cancelled = false;
+  
+  const initMedia = async () => {
+    if (mediaInitializedRef.current) {
+      console.log('[useVideoChat] Media already initialized, skipping');
+      return;
+    }
     
-    const initMedia = async () => {
-      if (mediaInitializedRef.current) {
-        console.log('[useVideoChat] Media already initialized, skipping');
+    console.log('[useVideoChat] Initializing media...', { isMicOn, isCameraOn });
+    
+    try {
+      const stream = await initializeMedia();
+      
+      if (cancelled || !stream) {
         return;
       }
       
-      console.log('[useVideoChat] Initializing media...', { isMicOn, isCameraOn });
+      console.log('[useVideoChat] Media initialized successfully', {
+        audioTracks: stream.getAudioTracks().length,
+        videoTracks: stream.getVideoTracks().length
+      });
       
-      try {
-        const stream = await initializeMedia();
-        
-        if (cancelled || !stream) {
-          return;
-        }
-        
-        for (const [peerId, pc] of peerConnectionsRef.current.entries()) {
-          try {
-            stream.getTracks().forEach(track => {
-              if (!pc.getSenders().some(snd => snd.track === track)) {
-                pc.addTrack(track, stream);
-                console.log(`[useVideoChat] Added ${track.kind} track to existing peer ${peerId}`);
-              }
-            });
-          } catch (err) {
-            console.warn('[useVideoChat] Failed to add track to existing peer', peerId, err);
-          }
-        }
-        
-      } catch (err) {
-        console.error('[useVideoChat] Media initialization failed', err);
-      }
-    };
-    
-    if (!mediaInitializedRef.current) {
-      initMedia();
+    } catch (err) {
+      console.error('[useVideoChat] Media initialization failed', err);
     }
-    
-    return () => { 
-      cancelled = true; 
-    };
-  }, []);
+  };
+  
+  if (!mediaInitializedRef.current) {
+    initMedia();
+  }
+  
+  return () => { 
+    cancelled = true; 
+  };
+}, []);
+
+useEffect(() => {
+  // Wait for media to be initialized before connecting
+  if (!mediaInitializedRef.current) {
+    console.log('[useVideoChat] Waiting for media initialization before WebSocket setup');
+    return;
+  }
+  
+  if (roomId && userName) {
+    console.log('[useVideoChat] Media ready, setting up WebSocket');
+    setConnectionStatus('connecting');
+    setupWebSocket();
+  }
+  
+  return () => {
+    // Cleanup handled by main unmount effect
+  };
+}, [roomId, userName, setupWebSocket, mediaInitializedRef.current]);
 
   // When localStream changes, add tracks to existing PCs
   useEffect(() => {
