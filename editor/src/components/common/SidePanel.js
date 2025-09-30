@@ -111,16 +111,7 @@ const SidePanel = ({
             </div>
 
             <div className="header-controls">
-              <Tooltip title={terminalVisible ? "Hide terminal" : "Show terminal"} color="#0f172a">
-                <motion.button
-                  className={`terminal-toggle ${terminalVisible ? 'active' : ''}`}
-                  onClick={onToggleTerminal}
-                  whileHover={{ scale: 1.05, y: -1 }}
-                  whileTap={{ scale: 0.95 }}
-                >
-                  <FaTerminal className="terminal-icon" />
-                </motion.button>
-              </Tooltip>
+              
 
               <Tooltip title="Run code (Ctrl + Enter)" color="#0f172a">
                 <motion.div
