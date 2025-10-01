@@ -3,102 +3,83 @@ const WebSocket = require('ws');
 const { v4: uuidv4 } = require('uuid');
 
 // Try to import register/unregister helpers from the share module.
+// share.js exports registerSocket(sessionId, peerId, ws) and unregisterSocket(sessionId, peerId)
 let registerSocket = () => {};
 let unregisterSocket = () => () => {};
 try {
   const share = require('./share');
+  // defensive mapping if functions exist
   if (typeof share.registerSocket === 'function') registerSocket = share.registerSocket;
   if (typeof share.unregisterSocket === 'function') unregisterSocket = share.unregisterSocket;
 } catch (e) {
-  console.warn('[video] warning: ./share not found — admin kick may not work', e);
+  console.warn('[video] warning: ./share not found or failed to load — admin kick may not work', e && e.stack ? e.stack : e);
 }
 
 const VIDEO_ROOMS = new Map();
 const ROOM_SERVERS = new Map();
 
+/**
+ * safeSendJson - guard send to avoid throwing on CLOSED sockets
+ */
 function safeSendJson(ws, obj) {
   try {
     if (!ws || ws.readyState !== WebSocket.OPEN) return false;
     ws.send(JSON.stringify(obj));
     return true;
   } catch (err) {
-    console.warn('[video] safeSendJson failed', err);
+    console.warn('[video] safeSendJson failed', err && err.stack ? err.stack : err);
     return false;
   }
 }
 
+/**
+ * videoWebSocketHandler
+ * Handles upgrade for /video/:roomId websocket
+ */
 exports.videoWebSocketHandler = (request, socket, head, roomId) => {
+  // Initialize room data structure if it doesn't exist
   if (!VIDEO_ROOMS.has(roomId)) {
     VIDEO_ROOMS.set(roomId, { clients: new Map(), userToWs: new Map() });
     console.log(`[video] created room ${roomId}`);
   }
   const room = VIDEO_ROOMS.get(roomId);
 
+  // Get or create the WebSocket server for this room
   let wss = ROOM_SERVERS.get(roomId);
   if (!wss) {
     wss = new WebSocket.Server({ noServer: true });
     ROOM_SERVERS.set(roomId, wss);
 
+    // Per-room connection handler
     wss.on('connection', (ws, request) => {
       const userId = uuidv4();
-      const userInfo = { 
-        userId, 
-        userName: 'Anonymous', 
-        mediaState: { 
-          isMicOn: false, 
-          isCameraOn: false,
-          isScreenSharing: false 
-        } 
-      };
+      const userInfo = { userId, userName: 'Anonymous', mediaState: undefined };
 
+      // store client ws -> info and userId -> ws
       room.clients.set(ws, userInfo);
       room.userToWs.set(userId, ws);
 
+      // Register socket in shared session registry so admin APIs can find it
       try {
         registerSocket(roomId, userId, ws);
       } catch (err) {
-        console.warn('[video] registerSocket failed', err);
+        console.warn('[video] registerSocket failed', err && err.stack ? err.stack : err);
       }
 
       console.log(`[video] connection OPEN room=${roomId} userId=${userId}`);
 
-      // Send assigned ID to new client
+      // Tell the newly-connected socket its assigned id
       safeSendJson(ws, { type: 'assign-id', id: userId });
 
-      // Send existing users to new client WITH their media states
+      // Send the current user-list to the new socket only (so it can build connections)
       const users = Array.from(room.clients.values())
         .filter(info => info.userId !== userId)
-        .map(info => ({ 
-          userId: info.userId, 
-          userName: info.userName, 
-          mediaState: info.mediaState 
-        }));
+        .map(info => ({ userId: info.userId, userName: info.userName, mediaState: info.mediaState }));
       safeSendJson(ws, { type: 'user-list', users });
+      console.log(`[video] sent user-list to ${userId}:`, users.map(u => u.userId));
 
-      // Broadcast new user join to all existing clients WITH media state
-      const joinMessage = { 
-        type: 'join', 
-        from: userId, 
-        name: userInfo.userName,
-        mediaState: userInfo.mediaState
-      };
-
-      room.clients.forEach((info, client) => {
-        if (client !== ws && client.readyState === WebSocket.OPEN) {
-          safeSendJson(client, joinMessage);
-        }
-      });
-
-      // NEW: Trigger existing clients to create offers for new user
-      room.clients.forEach((info, client) => {
-        if (client !== ws && client.readyState === WebSocket.OPEN) {
-          safeSendJson(client, { 
-            type: 'create-offer', 
-            to: userId,
-            from: info.userId 
-          });
-        }
-      });
+      // IMPORTANT: do NOT broadcast a 'join' here using server-side default userName.
+      // Wait for the client to send its own 'join' message (which carries the real name).
 
       ws.on('message', (dataRaw) => {
         let message;
@@ -110,23 +91,26 @@ exports.videoWebSocketHandler = (request, socket, head, roomId) => {
         }
 
         const { type, to } = message;
+        // Retrieve the authoritative stored info for this ws
         const senderInfo = room.clients.get(ws) || { userId, userName: 'Anonymous' };
 
-        // Update user info if provided
+        // If client provided a name, update authoritative record
         if (message.name && typeof message.name === 'string') {
           senderInfo.userName = message.name;
-          try { room.clients.set(ws, senderInfo); } catch (e) { }
+          try { room.clients.set(ws, senderInfo); } catch (e) { /* ignore */ }
         }
 
-        // Update media state if provided
+        // If client updated media state, persist it
         if (message.type === 'media-update' && typeof message.data === 'object') {
-          senderInfo.mediaState = { ...senderInfo.mediaState, ...message.data };
-          try { room.clients.set(ws, senderInfo); } catch (e) { }
+          senderInfo.mediaState = message.data;
+          try { room.clients.set(ws, senderInfo); } catch (e) { /* ignore */ }
         }
 
+        // Compose outgoing message that includes authoritative name
         const out = { ...message, from: userId, name: senderInfo.userName };
 
         switch (type) {
+          // direct signaling messages (to specific peer)
           case 'offer':
           case 'answer':
           case 'ice-candidate':
@@ -143,85 +127,25 @@ exports.videoWebSocketHandler = (request, socket, head, roomId) => {
             }
             break;
 
-          case 'create-offer':
-            // Handle create-offer requests from existing users to new users
-            if (to && room.userToWs.has(to)) {
-              const recipientWs = room.userToWs.get(to);
-              if (recipientWs && recipientWs.readyState === WebSocket.OPEN) {
-                safeSendJson(recipientWs, out);
-                console.log(`[video] forwarded create-offer from ${userId} -> ${to}`);
-              }
-            }
-            break;
-
+          // broadcast messages (join/media-update) to other participants
           case 'media-update':
-          case 'cursor':
-            // Broadcast to other participants
+            case 'cursor':
+  // payload should include { userId, selection, caret, name }
+  // Broadcast to other participants
+  room.clients.forEach((info, client) => {
+    if (client !== ws && client.readyState === WebSocket.OPEN) {
+      safeSendJson(client, out); // `out` is message with { ...message, from: userId, name }
+    }
+  });
+  break;
+
+          case 'join':
             room.clients.forEach((info, client) => {
               if (client !== ws && client.readyState === WebSocket.OPEN) {
                 safeSendJson(client, out);
               }
             });
-            break;
-
-          case 'set-quality': {
-            try {
-              const payload = message.data || {};
-              const quality = payload.quality || null;
-              const scope = payload.scope || 'global';
-
-              // Ack back to requester
-              safeSendJson(ws, { type: 'set-quality-ack', from: userId, data: { scope, quality } });
-
-              // If specific 'to' is set and different from requester, forward only to that peer
-              if (to && to !== userId && room.userToWs.has(to)) {
-                const recipientWs = room.userToWs.get(to);
-                if (recipientWs && recipientWs.readyState === WebSocket.OPEN) {
-                  safeSendJson(recipientWs, { type: 'set-quality-request', from: userId, data: { scope, quality } });
-                  console.log(`[video] forwarded set-quality-request from ${userId} -> ${to} (${quality})`);
-                }
-              } else {
-                // Broadcast to all other participants
-                room.clients.forEach((info, client) => {
-                  if (client !== ws && client.readyState === WebSocket.OPEN) {
-                    safeSendJson(client, { type: 'set-quality-request', from: userId, data: { scope, quality } });
-                  }
-                });
-                console.log(`[video] broadcasted set-quality-request from ${userId} to ${Math.max(0, room.clients.size - 1)} peers (${quality})`);
-              }
-            } catch (err) {
-              console.warn('[video] set-quality handling failed', err);
-            }
-            break;
-          }
-
-          case 'set-quality-done': {
-            try {
-              const payload = message.data || {};
-              const target = message.to;
-              if (target && room.userToWs.has(target)) {
-                const targetWs = room.userToWs.get(target);
-                if (targetWs && targetWs.readyState === WebSocket.OPEN) {
-                  safeSendJson(targetWs, { type: 'set-quality-done', from: userId, data: payload });
-                  console.log(`[video] forwarded set-quality-done from ${userId} -> ${target}`);
-                }
-              } else {
-                // Broadcast to everyone except sender
-                room.clients.forEach((info, client) => {
-                  if (client !== ws && client.readyState === WebSocket.OPEN) {
-                    safeSendJson(client, { type: 'set-quality-done', from: userId, data: payload });
-                  }
-                });
-                console.log(`[video] broadcasted set-quality-done from ${userId}`);
-              }
-            } catch (err) {
-              console.warn('[video] set-quality-done handling failed', err);
-            }
-            break;
-          }
-
-          case 'join':
-            // This case is now handled in the connection setup above
+            console.log(`[video] broadcasted ${type} from ${userId} to ${room.clients.size - 1} peers`);
             break;
 
           default:
@@ -248,14 +172,14 @@ exports.videoWebSocketHandler = (request, socket, head, roomId) => {
           try {
             unregisterSocket(roomId, leavingId);
           } catch (err) {
-            console.warn('[video] unregisterSocket failed', err);
+            console.warn('[video] unregisterSocket failed', err && err.stack ? err.stack : err);
           }
 
           // remove mappings
           room.clients.delete(ws);
           room.userToWs.delete(leavingId);
 
-          // Clean up room if empty
+          // Clean up room if empty (close wss after delay to allow reconnections)
           if (room.clients.size === 0) {
             VIDEO_ROOMS.delete(roomId);
             setTimeout(() => {
@@ -270,7 +194,7 @@ exports.videoWebSocketHandler = (request, socket, head, roomId) => {
       });
 
       ws.on('error', (err) => {
-        console.warn('[video] ws error (caught)', err);
+        console.warn('[video] ws error (caught)', err && err.stack ? err.stack : err);
       });
     });
   }
