@@ -1,5 +1,5 @@
 // Enhanced CollapsibleSidebar.js - Matching design aesthetic with other components
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback,useRef } from 'react';
 import { Tooltip } from 'antd';
 import {
   VscFiles,
@@ -271,20 +271,49 @@ const CollapsibleSidebar = ({
   onDockWhiteboard,
   enableHostNotes,
   terminalVisible,
-  onToggleTerminal
+  onToggleTerminal,
+  activePanel: externalActivePanel,activePanel,
+  onPanelChange, // Receive from parent
+  // Callback when panel changes
+   // Force sidebar to expand
 }) => {
-  const [activePanel, setActivePanel] = useState(() => {
-    const saved = sessionStorage.getItem('codecrew-active-panel');
-    return saved || 'files';
-  });
-  const [isExpanded, setIsExpanded] = useState(() => {
-    const saved = sessionStorage.getItem('codecrew-sidebar-expanded');
-    return saved !== null ? saved === 'true' : true;
-  });
+
+  
   const [unreadCount, setUnreadCount] = useState(0);
   const [sidebarWidth, setSidebarWidth] = useState(310);
   const [maxSidebarWidth, setMaxSidebarWidth] = useState(Math.round(window.innerWidth * 0.7));
 
+ 
+
+  // Determine which panel to show
+  
+
+  const [isExpanded, setIsExpanded] = useState(() => {
+    const saved = sessionStorage.getItem('codecrew-sidebar-expanded');
+    return saved !== null ? saved === 'true' : true;
+  });
+
+  // Handle force expand
+  useEffect(() => {
+    if (forceExpanded) {
+      setIsExpanded(true);
+      sessionStorage.setItem('codecrew-sidebar-expanded', 'true');
+    }
+  }, [forceExpanded]);
+
+  
+const [visible, setVisible] = useState(false);
+  const containerRef = useRef(null);
+
+  // Accessible handlers for keyboard
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      setVisible((v) => !v);
+    } else if (e.key === "Escape") {
+      setVisible(false);
+    }
+  };
   useEffect(() => {
     const onResize = () => setMaxSidebarWidth(Math.round(window.innerWidth * 0.7));
     window.addEventListener('resize', onResize);
@@ -323,20 +352,20 @@ const CollapsibleSidebar = ({
     }
   }, [sidebarWidth, isExpanded, onSidebarResize]);
 
-  const togglePanel = (panel) => {
+   const togglePanel = (panel) => {
     if (activePanel === panel && isExpanded) {
       setIsExpanded(false);
       sessionStorage.setItem('codecrew-sidebar-expanded', 'false');
     } else {
-      setActivePanel(panel);
-      sessionStorage.setItem('codecrew-active-panel', panel);
+      onPanelChange(panel);
       setIsExpanded(true);
       sessionStorage.setItem('codecrew-sidebar-expanded', 'true');
+      
       if (panel === 'chat') {
         setUnreadCount(0);
       }
     }
-  };
+  }
 
   const handleUnreadChange = useCallback((count) => {
     setUnreadCount(count);
@@ -568,7 +597,125 @@ const CollapsibleSidebar = ({
                       terminalVisible={terminalVisible}
                       onToggleTerminal={onToggleTerminal}
                     />
+                <div
+      ref={containerRef}
+      // Parent positioned so tooltip absolute is relative to the parent
+      style={{
+        position: "absolute",
+        top: 3,
+        right: 60,
+        zIndex: 1400,
+        width: "44px",
+        height: "44px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        boxSizing: "border-box",
+      }}
+    >
+      {/* Bulb button */}
+      <button
+        aria-expanded={visible}
+        aria-haspopup="true"
+        onMouseEnter={() => setVisible(true)}
+        onMouseLeave={() => setVisible(false)}
+        onFocus={() => setVisible(true)}
+        onBlur={() => setVisible(false)}
+        onKeyDown={handleKeyDown}
+        
+      >
+        <span
+          style={{
+            fontSize: 14,
+            lineHeight: 1,
+            background: "linear-gradient(135deg,#fef3c7,#fde68a)",
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent",
+            filter: "drop-shadow(0 0 6px rgba(254,249,195,0.35))",
+            transform: visible ? "scale(1.05)" : "scale(1)",
+            transition: "transform 0.18s ease",
+            display: "inline-block",
+          }}
+        >
+          💡
+        </span>
+      </button>
+
+      {/* Tooltip - appears when hovering or focused */}
+      <div
+        onMouseEnter={() => setVisible(true)}
+        onMouseLeave={() => setVisible(false)}
+        style={{
+          pointerEvents: visible ? "auto" : "none", // avoid catching pointer when hidden
+          opacity: visible ? 1 : 0,
+          transform: visible ? "translateY(-6px) scale(1)" : "translateY(0) scale(0.98)",
+          transition: "opacity 0.18s ease, transform 0.18s ease",
+          position: "absolute",
+          right: "0", // position left of the bulb (tweak as needed)
+          top: "220%",
+          transformOrigin: "right center",
+          translate: "0 -50%",
+          // compact card style
+          minWidth: 240,
+          maxWidth: "min(280px, 70vw)",
+          padding: "8px 10px",
+          background: "linear-gradient(135deg, rgba(15,23,42,0.95), rgba(30,41,59,0.92))",
+          color: "#fef3c7",
+          borderRadius: 10,
+          border: "1px solid rgba(254,249,195,0.10)",
+          boxShadow: "0 12px 28px rgba(2,6,23,0.45), 0 4px 10px rgba(254,249,195,0.06)",
+          display: "flex",
+          gap: 10,
+          alignItems: "flex-start",
+          zIndex: 1401,
+          boxSizing: "border-box",
+          transformStyle: "preserve-3d",
+        }}
+      >
+        {/* small glow line */}
+        <div
+          style={{
+            position: "absolute",
+            left: 10,
+            right: 10,
+            top: 8,
+            height: 1,
+            background: "linear-gradient(90deg, transparent, rgba(254,249,195,0.18), transparent)",
+            borderRadius: 1,
+            pointerEvents: "none",
+          }}
+        />
+
+        {/* Tiny icon inside tooltip */}
+        <div
+          style={{
+            fontSize: 14,
+            lineHeight: 1,
+            filter: "drop-shadow(0 0 6px rgba(254,249,195,0.25))",
+            background: "linear-gradient(135deg,#fef3c7,#fde68a)",
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent",
+            flexShrink: 0,
+            marginTop: 2,
+          }}
+        >
+          💡
+        </div>
+
+        {/* Compact text */}
+        <div style={{ fontSize: 12, lineHeight: 1.3 }}>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>Project Structure</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span>• Multiple files may contain <code>main()</code>.</span>
+            <span>• They must be independent (no includes between them).</span>
+            <span>• If one main file imports project code, building all files together</span>
+            <span style={{ marginLeft: 8 }}>→ may cause multiple-definition errors.</span>
+          </div>
+        </div>
+      </div>
+    </div>
                   </div>
+                  
                 )}
 
                 {activePanel === 'whiteboard' && (
