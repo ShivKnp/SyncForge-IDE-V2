@@ -32,7 +32,10 @@ const EditorPageContent = ({ id, userName }) => {
     editorTheme,
     files,
     fileTree,
-    docRef
+    docRef,
+    isSaving,
+    lastSaved,
+    hasUnsavedChanges
   } = useEditorState(id, userName);
 
   const videoHook = useVideoChat(id, userName);
@@ -65,6 +68,41 @@ const EditorPageContent = ({ id, userName }) => {
       return false;
     }
   });
+const [activeSidebarPanel, setActiveSidebarPanel] = useState(() => {
+  const saved = sessionStorage.getItem('codecrew-active-panel');
+  // Default to 'files' if no saved preference exists (first time entering)
+  return saved || 'files';
+});
+
+  const handleOpenSidebarPanel = useCallback((panelName) => {
+    setActiveSidebarPanel(panelName);
+    sessionStorage.setItem('codecrew-active-panel', panelName);
+    
+    // Force sidebar to expand
+    setForceSidebarExpanded(true);
+    
+    // Reset force flag after animation
+    setTimeout(() => {
+      setForceSidebarExpanded(false);
+    }, 500);
+  }, []);
+
+  const getExistingNames = useCallback((parentNodeId) => {
+    if (!parentNodeId || !state.tree || !state.tree[parentNodeId]) {
+      return [];
+    }
+
+    const parentNode = state.tree[parentNodeId];
+    if (!parentNode.children) {
+      return [];
+    }
+
+    return parentNode.children
+      .map(childId => state.tree[childId]?.name)
+      .filter(Boolean);
+  }, [state.tree]);
+
+
   const [hostModalVisible, setHostModalVisible] = useState(false);
   const [configDraft, setConfigDraft] = useState(null);
   const [configSaving, setConfigSaving] = useState(false);
@@ -73,6 +111,7 @@ const EditorPageContent = ({ id, userName }) => {
   const [sidebarWidth, setSidebarWidth] = useState(300);
   const [videoHookReady, setVideoHookReady] = useState(false);
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
+  const [forceSidebarExpanded, setForceSidebarExpanded] = useState(false);
   
   // Enhanced state for transitions
   const [pageLoaded, setPageLoaded] = useState(false);
@@ -466,6 +505,12 @@ const EditorPageContent = ({ id, userName }) => {
         {/* Enhanced Sidebar with slide-in animation */}
         <div className={`transition-all duration-500 ease-out transform ${pageLoaded ? 'translate-x-0' : '-translate-x-full'}`}>
           <CollapsibleSidebar
+          activePanel={activeSidebarPanel}
+ onPanelChange={(panel) => {
+    setActiveSidebarPanel(panel);
+    sessionStorage.setItem('codecrew-active-panel', panel);
+  }}
+            forceExpanded={forceSidebarExpanded}
             terminalVisible={terminalVisible}
             onToggleTerminal={toggleTerminal}
             onSidebarResize={(width, expanded) => {
@@ -684,11 +729,43 @@ const EditorPageContent = ({ id, userName }) => {
             {!showAiInMain && !showVideoInMain && !showWhiteboardInMain && (
               <div className="flex-1 min-h-0 flex flex-col overflow-hidden animate-fadeIn">
                 <CodeEditor
+                 isSaving={isSaving}
+        lastSaved={lastSaved}
+        hasUnsavedChanges={hasUnsavedChanges}
+                input={state.input}
+                output={state.output}
+                lang={state.lang}
+                handleLang={actions.handleLang}
+                handleRun={actions.handleRun}
+                handleInput={actions.handleInput}
+                runCodeDisabled={state.runCodeDisabled}
+                roomMode={state.roomMode}
+                projectLanguage={state.projectLanguage}
+                sharedInputOutput={sharedInputOutput}
+                
+                // Sidebar control props
+                onOpenSidebarPanel={handleOpenSidebarPanel}
+                selectedNodeId={state.selectedNodeId}
+                getExistingNames={getExistingNames}
+                
+                // Updated file/folder creation signatures
+                onNewFile={(parentNodeId, fileName) => {
+                  // Create file with the provided name
+                  if (actions.createNewFile) {
+                    actions.createNewFile(parentNodeId, fileName);
+                  }
+                }}
+                onNewFolder={(parentNodeId, folderName) => {
+                  // Create folder with the provided name
+                  if (actions.createFolder) {
+                    actions.createFolder(parentNodeId, folderName);
+                  }
+                }}
                   monaco={state.monaco}
                   editor={state.editor}
                   binding={state.binding}
                   activeFile={state.activeFileId ? state.files[state.activeFileId] : null}
-                  lang={state.lang}
+                  
                   theme={state.theme}
                   fontSize={state.fontSize}
                   openFiles={state.files}
@@ -696,8 +773,8 @@ const EditorPageContent = ({ id, userName }) => {
                   onTabChange={actions.handleTabChange}
                   onEditorMount={actions.editorDidMount}
                   onEditorChange={actions.editorOnChange}
-                  onNewFile={actions.createNewFile}
-                  onNewFolder={actions.createFolder}
+                  // onNewFile={actions.createNewFile}
+                  // onNewFolder={actions.createFolder}
                   terminalVisible={terminalVisible}
                   onDownloadFile={actions.handleSaveCode}
                   onSaveToWorkspace={handleSaveToWorkspace}
@@ -995,7 +1072,7 @@ const EditorPageContent = ({ id, userName }) => {
       {[
         { label: 'Room Mode', key: 'roomMode', type: 'select', options: [
           { value: 'project', label: 'Project' },
-          { value: 'polyglot', label: 'Polyglot' }
+          { value: 'polyglot', label: 'Playground' }
         ], current: configDraft.roomMode || state.roomMode },
         { label: 'Language', key: 'projectLanguage', type: 'select', options: [
           { value: 'cpp', label: 'C++' },
