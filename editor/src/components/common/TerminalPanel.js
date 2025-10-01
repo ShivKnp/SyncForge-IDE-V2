@@ -330,4 +330,3 @@ const TerminalPanel = ({ sessionId, visible = false, workingDir = '', onToggle, 
 };
 
 export default TerminalPanel;
-
