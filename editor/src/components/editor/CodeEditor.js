@@ -1,5 +1,5 @@
 import React, { Suspense, useState, useRef, useEffect } from 'react';
-import { Button, Space, Tooltip, Dropdown, message, Input } from 'antd';
+import { Button, Space, Tooltip, Dropdown, message, Input, Modal, Form } from 'antd';
 import {
   FileAddOutlined,
   FolderAddOutlined,
@@ -12,17 +12,22 @@ import {
   PlusOutlined,
   MinusOutlined,
   FolderOutlined,
-  ShareAltOutlined
+  ShareAltOutlined,
+  DownloadOutlined,
+  PlayCircleOutlined,
+  FileOutlined,
+  ExclamationCircleOutlined
 } from '@ant-design/icons';
 import { FaTerminal, FaSearch } from 'react-icons/fa';
 import JSZip from 'jszip';
 
 import Editor from '@monaco-editor/react';
 const { Search } = Input;
+const { TextArea } = Input;
 
 const BACKEND_BASE = process.env.REACT_APP_API_URL || 'http://localhost:8080';
 
-// Enhanced AI ghost widget styles with transitions
+// Enhanced AI ghost widget styles
 const aiStyles = `
   .ai-ghost-widget {
     position: fixed;
@@ -42,13 +47,13 @@ const aiStyles = `
     animation: aiGhostSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     transform-origin: top left;
   }
-  
+
   .ai-ghost-text {
     color: rgba(14, 165, 164, 0.8) !important;
     font-style: italic;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
   }
-  
+
   .ai-ghost-hint {
     font-size: 11px;
     color: rgba(148, 163, 184, 0.7);
@@ -57,21 +62,21 @@ const aiStyles = `
     padding-top: 4px;
     animation: aiHintFadeIn 0.5s ease-out 0.2s both;
   }
-  
+
   .vs .ai-ghost-widget {
     background: linear-gradient(135deg, rgba(248, 250, 252, 0.95), rgba(226, 232, 240, 0.9));
     border-color: rgba(14, 165, 164, 0.3);
   }
-  
+
   .vs .ai-ghost-text {
     color: rgba(14, 116, 144, 0.9) !important;
   }
-  
+
   .vs .ai-ghost-hint {
     color: rgba(71, 85, 105, 0.8);
     border-top-color: rgba(14, 165, 164, 0.3);
   }
-  
+
   .ai-loading-indicator {
     display: inline-flex;
     align-items: center;
@@ -83,7 +88,7 @@ const aiStyles = `
     backdrop-filter: blur(4px);
     animation: aiLoadingPulse 2s ease-in-out infinite;
   }
-  
+
   .ai-loading-spinner {
     width: 12px;
     height: 12px;
@@ -92,7 +97,7 @@ const aiStyles = `
     border-radius: 50%;
     animation: aiSpin 1s linear infinite;
   }
-  
+
   @keyframes aiGhostSlideIn {
     from {
       opacity: 0;
@@ -103,7 +108,7 @@ const aiStyles = `
       transform: translateY(0) scale(1);
     }
   }
-  
+
   @keyframes aiHintFadeIn {
     from {
       opacity: 0;
@@ -114,12 +119,12 @@ const aiStyles = `
       transform: translateY(0);
     }
   }
-  
+
   @keyframes aiSpin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
   }
-  
+
   @keyframes aiLoadingPulse {
     0%, 100% { 
       opacity: 0.7; 
@@ -130,7 +135,7 @@ const aiStyles = `
       box-shadow: 0 0 0 4px rgba(14, 165, 164, 0);
     }
   }
-  
+
   .bg-slate-900\\/60 .ai-loading-spinner {
     width: 10px;
     height: 10px;
@@ -142,6 +147,285 @@ const aiStyles = `
 const styleSheet = document.createElement('style');
 styleSheet.textContent = aiStyles;
 document.head.appendChild(styleSheet);
+
+// Create Item Modal Component (from FileTree)
+const CreateItemModal = ({ 
+  visible, 
+  onCancel, 
+  onConfirm, 
+  type, 
+  parentNode,
+  existingNames = []
+}) => {
+  const [form] = Form.useForm();
+  const [validationError, setValidationError] = useState('');
+
+  useEffect(() => {
+    if (visible) {
+      form.resetFields();
+      setValidationError('');
+    }
+  }, [visible, form]);
+
+  const handleOk = async () => {
+    try {
+      const values = await form.validateFields();
+      const itemName = values.name.trim();
+
+      const validation = validateItemName(itemName, type, existingNames);
+
+      if (!validation.isValid) {
+        setValidationError(validation.error);
+        return;
+      }
+
+      setValidationError('');
+      onConfirm(itemName);
+      form.resetFields();
+    } catch (error) {
+      console.log('Validation failed:', error);
+    }
+  };
+
+  const validateItemName = (name, itemType, existingNames) => {
+    if (!name || name.trim().length === 0) {
+      return { isValid: false, error: `${itemType === 'file' ? 'File' : 'Folder'} name is required` };
+    }
+
+    if (name.length > 255) {
+      return { isValid: false, error: 'Name must be less than 255 characters' };
+    }
+
+    const invalidChars = /[<>:"/\\|?*\x00-\x1F]/;
+    if (invalidChars.test(name)) {
+      return { isValid: false, error: 'Name contains invalid characters: < > : " / \\ | ? *' };
+    }
+
+    const reservedNames = ['CON', 'PRN', 'AUX', 'NUL', 'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9', 'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9'];
+    if (reservedNames.includes(name.toUpperCase())) {
+      return { isValid: false, error: 'This name is reserved by the system' };
+    }
+
+    if (existingNames.includes(name)) {
+      return { isValid: false, error: `A ${itemType === 'file' ? 'file' : 'folder'} with this name already exists` };
+    }
+
+    if (itemType === 'file') {
+      if (name.endsWith('.') || name.endsWith(' ')) {
+        return { isValid: false, error: 'File name cannot end with a dot or space' };
+      }
+    }
+
+    if (itemType === 'folder') {
+      if (name.endsWith('.') || name.endsWith(' ')) {
+        return { isValid: false, error: 'Folder name cannot end with a dot or space' };
+      }
+    }
+
+    return { isValid: true, error: '' };
+  };
+
+  const handleNameChange = (e) => {
+    const name = e.target.value;
+    if (name.trim()) {
+      const validation = validateItemName(name, type, existingNames);
+      setValidationError(validation.error || '');
+    } else {
+      setValidationError('');
+    }
+  };
+
+  const getPlaceholder = () => {
+    if (type === 'file') {
+      return 'e.g., index.html, script.js, styles.css';
+    }
+    return 'e.g., src, components, assets';
+  };
+
+  const getDefaultName = () => {
+    const baseName = type === 'file' ? 'new-file' : 'new-folder';
+    let counter = 1;
+    let newName = baseName;
+
+    while (existingNames.includes(newName)) {
+      newName = `${baseName}-${counter}`;
+      counter++;
+    }
+
+    return newName;
+  };
+
+  return (
+    <Modal
+  title={
+    <div className="flex items-center gap-2">
+      <div className="terminal-toggle active" style={{ 
+        background: type === 'file' ? 'rgba(59, 130, 246, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+        borderColor: type === 'file' ? 'rgba(59, 130, 246, 0.3)' : 'rgba(245, 158, 11, 0.3)'
+      }}>
+        {type === 'file' ? <FileOutlined className="terminal-icon" /> : <FolderOutlined className="terminal-icon" />}
+      </div>
+      <span className="text-slate-100 font-semibold text-sm">
+        Create New {type === 'file' ? 'File' : 'Folder'}
+      </span>
+    </div>
+  }
+  open={visible}
+  onOk={handleOk}
+  onCancel={() => {
+    form.resetFields();
+    setValidationError('');
+    onCancel();
+  }}
+  okText={`Create ${type === 'file' ? 'File' : 'Folder'}`}
+  cancelText="Cancel"
+  className="create-item-modal host-modal-style"
+  width={480}
+  transitionName="ant-zoom"
+  maskTransitionName="ant-fade"
+  styles={{
+    body: { 
+      padding: '20px',
+      background: 'linear-gradient(180deg, rgba(15,23,42,0.95), rgba(7,17,26,0.95))',
+      color: '#e2e8f0',
+      backdropFilter: 'blur(20px)',
+      opacity: 0,
+      transform: 'scale(0.95) translateY(-10px)',
+      animation: 'modalEnter 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards'
+    },
+    header: {
+      background: 'linear-gradient(135deg, rgba(15,23,42,0.95), rgba(30,41,59,0.9))',
+      borderBottom: `1px solid ${type === 'file' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(245, 158, 11, 0.15)'}`,
+      color: '#e2e8f0',
+      padding: '16px 20px',
+      minHeight: 'auto',
+      opacity: 0,
+      transform: 'translateY(-10px)',
+      animation: 'modalHeaderEnter 0.3s cubic-bezier(0.4, 0, 0.2, 1) 0.1s forwards'
+    },
+    content: {
+      backgroundColor: 'transparent',
+      backdropFilter: 'blur(20px)',
+      boxShadow: `0 20px 40px -12px rgba(0, 0, 0, 0.6), 0 0 0 1px ${type === 'file' ? 'rgba(59, 130, 246, 0.1)' : 'rgba(245, 158, 11, 0.1)'}`,
+      border: 'none',
+      opacity: 0,
+      transform: 'scale(0.95)',
+      animation: 'modalContentEnter 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards'
+    },
+    footer: {
+      background: 'linear-gradient(180deg, rgba(15,23,42,0.8), rgba(7,17,26,0.9))',
+      borderTop: `1px solid ${type === 'file' ? 'rgba(59, 130, 246, 0.1)' : 'rgba(245, 158, 11, 0.1)'}`,
+      padding: '16px 20px',
+      marginTop: '8px',
+      display: 'flex',
+      justifyContent: 'flex-end',
+      gap: '8px'
+    }
+  }}
+  okButtonProps={{
+    className: type === 'file' ? 'modal-file-create-btn animate-pulse-once' : 'modal-folder-create-btn animate-pulse-once'
+  }}
+  cancelButtonProps={{
+    className: 'modal-cancel-btn'
+  }}
+  closeIcon={
+    <div className="modal-close-btn">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path 
+          d="M1 1L13 13M13 1L1 13" 
+          stroke="currentColor" 
+          strokeWidth="2" 
+          strokeLinecap="round" 
+          strokeLinejoin="round"
+          className="transition-all duration-300"
+        />
+      </svg>
+    </div>
+  }
+  destroyOnClose
+>
+  <div className="space-y-4 modal-content-inner">
+    <div className="text-slate-400 text-sm animate-fadeInUp" style={{ animationDelay: '0.1s' }}>
+      Creating in: <span className="text-cyan-300 font-medium">{parentNode?.name || 'root'}</span>
+    </div>
+
+    <Form
+      form={form}
+      layout="vertical"
+      initialValues={{ name: getDefaultName() }}
+    >
+      <Form.Item
+        label={
+          <span className="text-slate-300 text-sm font-medium animate-fadeInUp" style={{ animationDelay: '0.2s' }}>
+            {type === 'file' ? 'File Name' : 'Folder Name'}
+          </span>
+        }
+        name="name"
+        rules={[
+          { required: true, message: `Please enter a ${type === 'file' ? 'file' : 'folder'} name` },
+        ]}
+        help={validationError && (
+          <div className="flex items-center gap-2 text-rose-400 text-xs mt-1 animate-fadeInUp" style={{ animationDelay: '0.3s' }}>
+            <ExclamationCircleOutlined />
+            <span>{validationError}</span>
+          </div>
+        )}
+        validateStatus={validationError ? 'error' : ''}
+      >
+        <Input
+          placeholder={getPlaceholder()}
+          onChange={handleNameChange}
+          autoFocus
+          className="modal-input animate-fadeInUp"
+          style={{ animationDelay: '0.2s' }}
+          onPressEnter={handleOk}
+        />
+      </Form.Item>
+    </Form>
+
+    <div className="bg-gradient-to-r from-slate-800/40 to-slate-700/30 p-4 border border-slate-700/30 animate-fadeInUp" style={{ animationDelay: '0.3s' }}>
+      <div className="text-xs text-slate-400 space-y-2">
+        <div className="font-medium text-slate-300 mb-2 flex items-center gap-2">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path 
+              d="M6 3V6M6 9H6.005M5 1H7C7.55228 1 8 1.44772 8 2V10C8 10.5523 7.55228 11 7 11H5C4.44772 11 4 10.5523 4 10V2C4 1.44772 4.44772 1 5 1Z" 
+              stroke="currentColor" 
+              strokeWidth="1.2" 
+              strokeLinecap="round"
+            />
+          </svg>
+          Naming Rules:
+        </div>
+        <div className="grid grid-cols-2 gap-1 text-xs">
+          <div className="flex items-center gap-1">
+            <div className="w-1 h-1 bg-rose-400"></div>
+            <span>No: &lt; &gt; : " / \\ | ? *</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-1 h-1 bg-rose-400"></div>
+            <span>Max 255 characters</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-1 h-1 bg-rose-400"></div>
+            <span>No reserved names</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-1 h-1 bg-rose-400"></div>
+            <span>Must be unique</span>
+          </div>
+        </div>
+        {type === 'file' && (
+          <div className="flex items-center gap-1 mt-2 text-cyan-400">
+            <div className="w-1 h-1 bg-cyan-400"></div>
+            <span>Include extension (e.g., .js, .html, .css)</span>
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+</Modal>
+  );
+};
 
 const CodeEditor = ({
   activeFile,
@@ -168,7 +452,24 @@ const CodeEditor = ({
   openHostModal = null,
   sessionId = null,
   style = {}, 
-  terminalVisible = false
+  terminalVisible = false,
+  // Run functionality props (from SidePanel)
+  input,
+  output,
+  handleLang,
+  handleRun,
+  handleInput,
+  runCodeDisabled = false,
+  roomMode,
+  projectLanguage,
+  sharedInputOutput,
+  // Sidebar control props
+  onOpenSidebarPanel, // Function to open specific sidebar panel
+  selectedNodeId, // For getting parent folder context
+  getExistingNames,
+  isSaving = false,
+  lastSaved = null,
+  hasUnsavedChanges = false 
 }) => {
   const [wordWrap, setWordWrap] = useState(false);
   const fileContent = activeFile ? activeFile.content : '';
@@ -178,14 +479,32 @@ const CodeEditor = ({
   const editorInstanceRef = useRef(null);
   const monacoRef = useRef(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const formatLastSaved = (date) => {
+    if (!date) return 'Never';
+    const now = new Date();
+    const diffMs = now - new Date(date);
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffSecs = Math.floor(diffMs / 1000);
+    
+    if (diffSecs < 60) return `${diffSecs}s ago`;
+    if (diffMins < 60) return `${diffMins}m ago`;
+    return date.toLocaleTimeString();
+  };
 
   const [collapsedToolbar, setCollapsedToolbar] = useState(false);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [cursorPosition, setCursorPosition] = useState({ lineNumber: 1, column: 1 });
-  const [isToolbarExpanded, setIsToolbarExpanded] = useState(true);
   const [isEditorReady, setIsEditorReady] = useState(false);
   const [isConnected, setIsConnected] = useState(true);
   const [cursorBlinking, setCursorBlinking] = useState(true);
+
+  // Modal states for file/folder creation
+  const [createModal, setCreateModal] = useState({
+    visible: false,
+    type: 'file',
+    parentNodeId: null,
+    parentNode: null
+  });
 
   const aiDebounceRef = useRef(null);
   const ghostRef = useRef(null);
@@ -209,25 +528,11 @@ const CodeEditor = ({
     };
   }, []);
 
-  // Connection status simulation (replace with actual connection logic)
-  useEffect(() => {
-    const checkConnection = () => {
-      // This would be replaced with actual terminal/backend connection check
-      const isTerminalConnected = terminalVisible && Math.random() > 0.3; // Simulate occasional disconnection
-      setIsConnected(isTerminalConnected || !terminalVisible);
-    };
-
-    connectionCheckRef.current = setInterval(checkConnection, 3000);
-    return () => {
-      if (connectionCheckRef.current) clearInterval(connectionCheckRef.current);
-    };
-  }, [terminalVisible]);
-
   // Cursor blinking effect
   useEffect(() => {
     const blinkInterval = setInterval(() => {
       setCursorBlinking(prev => !prev);
-    }, 530); // Standard cursor blink rate
+    }, 530);
 
     return () => clearInterval(blinkInterval);
   }, []);
@@ -252,185 +557,13 @@ const CodeEditor = ({
     inlineSuggest: { enabled: false }
   };
 
-  // AI Completion Functions (unchanged functionality)
-  const fetchAiCompletion = async (prefix, suffix, language, filename) => {
-    setIsAiLoading(true);
-    try {
-      const payload = {
-        language: language || 'plaintext',
-        prefix: prefix || '',
-        suffix: suffix || '',
-        filename: filename || 'file.txt'
-      };
-
-      const response = await fetch(`${BACKEND_BASE}/api/ai-complete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-      const data = await response.json();
-      return data.suggestions || [];
-
-    } catch (error) {
-      console.error('[AI] Fetch error:', error);
-      
-      const fallbacks = [];
-      if (prefix.includes('#include')) {
-        fallbacks.push({ insertText: '<vector>', label: 'Include vector' });
-      } else if (prefix.includes('function') || prefix.includes('def ') || prefix.includes('func ')) {
-        fallbacks.push({ insertText: '() {\n    \n}', label: 'Function template' });
-      } else if (prefix.includes('console')) {
-        fallbacks.push({ insertText: 'log("");', label: 'Console log' });
-      } else {
-        fallbacks.push({ insertText: '// Your code here', label: 'Code template' });
-      }
-      
-      return fallbacks;
-    } finally {
-      setIsAiLoading(false);
-    }
-  };
-
   const clearGhost = () => {
     if (!ghostRef.current) return;
-    
     const widget = document.getElementById('ai-ghost-widget');
     if (widget) widget.remove();
-    
     ghostRef.current = null;
   };
 
-  const showGhost = (suggestion, editor, monaco, prefix) => {
-    if (!suggestion || !editor || !monaco) return;
-
-    const position = editor.getPosition();
-    if (!position) return;
-
-    const fullText = suggestion.insertText || '';
-    if (!fullText) return;
-
-    let remaining = fullText;
-    if (prefix && prefix.length > 0) {
-      const maxCheckLength = Math.min(prefix.length, 20);
-      for (let i = maxCheckLength; i > 0; i--) {
-        const endOfPrefix = prefix.slice(-i);
-        if (fullText.startsWith(endOfPrefix)) {
-          remaining = fullText.slice(i);
-          break;
-        }
-      }
-    }
-
-    if (!remaining || remaining.trim().length === 0) {
-      clearGhost();
-      return;
-    }
-
-    clearGhost();
-
-    const editorDomNode = editor.getDomNode();
-    if (!editorDomNode) return;
-
-    const widget = document.createElement('div');
-    widget.id = 'ai-ghost-widget';
-    widget.className = 'ai-ghost-widget';
-    widget.innerHTML = `
-      <div class="ai-ghost-text">${remaining}</div>
-      <div class="ai-ghost-hint">Press Tab to accept</div>
-    `;
-
-    const coordinates = editor.getScrolledVisiblePosition(position);
-    if (coordinates) {
-      const editorRect = editorDomNode.getBoundingClientRect();
-      const scrollContainer = editorDomNode.querySelector('.monaco-scrollable-element');
-      
-      if (scrollContainer) {
-        const scrollLeft = scrollContainer.scrollLeft;
-        const scrollTop = scrollContainer.scrollTop;
-        
-        widget.style.position = 'absolute';
-        widget.style.left = `${coordinates.left - scrollLeft + editorRect.left}px`;
-        widget.style.top = `${coordinates.top - scrollTop + editorRect.top}px`;
-        widget.style.zIndex = '1000';
-      }
-    }
-
-    document.body.appendChild(widget);
-
-    ghostRef.current = {
-      widget: widget,
-      suggestion: suggestion,
-      remaining: remaining,
-      fullText: fullText,
-      position: { ...position }
-    };
-  };
-
-  const acceptGhost = () => {
-    if (!ghostRef.current) return;
-
-    const editor = editorInstanceRef.current;
-    const monaco = monacoRef.current;
-    const suggestion = ghostRef.current.suggestion;
-    if (!editor || !monaco || !suggestion) return;
-
-    const position = editor.getPosition();
-    if (!position) return;
-
-    try {
-      editor.executeEdits('ai-accept', [{
-        range: new monaco.Range(
-          position.lineNumber,
-          position.column,
-          position.lineNumber,
-          position.column
-        ),
-        text: suggestion.insertText,
-        forceMoveMarkers: true
-      }]);
-    } catch (err) {
-      console.error('[AI] acceptGhost failed', err);
-    } finally {
-      clearGhost();
-    }
-  };
-
-  const triggerAICompletion = async () => {
-    const editor = editorInstanceRef.current;
-    const monaco = monacoRef.current;
-    if (!editor || !monaco) return;
-
-    const model = editor.getModel();
-    const position = editor.getPosition();
-    if (!model || !position) return;
-
-    const offset = model.getOffsetAt(position);
-    const value = model.getValue();
-    const prefix = value.substring(0, offset);
-    const suffix = value.substring(offset);
-
-    if (prefix.trim().length < 2) {
-      clearGhost();
-      return;
-    }
-
-    try {
-      const suggestions = await fetchAiCompletion(prefix, suffix, lang, activeFile?.name);
-      if (suggestions && suggestions.length > 0) {
-        showGhost(suggestions[0], editor, monaco, prefix);
-      } else {
-        clearGhost();
-      }
-    } catch (err) {
-      console.error('[AI] Completion failed', err);
-      clearGhost();
-    }
-  };
-
-  // Enhanced Editor Mount with transitions and cursor effects
   const handleEditorMount = (editor, monaco) => {
     editorInstanceRef.current = editor;
     monacoRef.current = monaco;
@@ -439,89 +572,23 @@ const CodeEditor = ({
 
     if (typeof onEditorMount === 'function') onEditorMount(editor, monaco);
 
-    // Enhanced cursor position tracking with smooth transitions
     editor.onDidChangeCursorPosition((e) => {
       setCursorPosition(e.position);
-      setCursorBlinking(true); // Reset cursor blink on movement
+      setCursorBlinking(true);
       clearGhost();
-      
-      // Add smooth cursor movement effect
+
       const cursorElement = document.querySelector('.monaco-editor .cursor');
       if (cursorElement) {
         cursorElement.style.transition = 'all 0.1s ease-out';
       }
     });
 
-    editor.onDidChangeModel(() => clearGhost());
+    editor.onDidChangeModel(() => {
+      clearGhost();
+    });
     editor.onDidBlurEditorWidget(() => clearGhost());
     editor.onDidScrollChange(() => clearGhost());
 
-    // Enhanced typing effects
-    editor.onDidChangeModelContent((e) => {
-      // Add typing animation class to changed lines
-      const changedLines = e.changes.map(change => change.range.startLineNumber);
-      changedLines.forEach(lineNumber => {
-        setTimeout(() => {
-          const lineElement = document.querySelector(`.monaco-editor .view-line[data-line-number="${lineNumber}"]`);
-          if (lineElement) {
-            lineElement.classList.add('typing-animation');
-            setTimeout(() => {
-              lineElement.classList.remove('typing-animation');
-            }, 300);
-          }
-        }, 10);
-      });
-    });
-
-    editor.addCommand(monaco.KeyCode.Tab, () => {
-      if (ghostRef.current) {
-        acceptGhost();
-        return;
-      }
-      editor.trigger('keyboard', 'tab', {});
-    });
-
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Space, () => {
-      triggerAICompletion();
-    });
-
-    editor.onKeyDown((e) => {
-      if (e.code !== 'Shift' && e.code !== 'Control' && e.code !== 'Alt' && e.code !== 'Meta' && e.code !== 'Tab') {
-        clearGhost();
-      }
-
-      if (e.code === 'Space' || e.code === 'Enter') {
-        if (aiDebounceRef.current) clearTimeout(aiDebounceRef.current);
-        aiDebounceRef.current = setTimeout(triggerAICompletion, 400);
-      }
-    });
-
-    const updateWidgetPosition = () => {
-      if (ghostRef.current && ghostRef.current.widget) {
-        const editorDomNode = editor.getDomNode();
-        const position = editor.getPosition();
-        
-        if (editorDomNode && position) {
-          const coordinates = editor.getScrolledVisiblePosition(position);
-          if (coordinates) {
-            const editorRect = editorDomNode.getBoundingClientRect();
-            const scrollContainer = editorDomNode.querySelector('.monaco-scrollable-element');
-            
-            if (scrollContainer) {
-              const scrollLeft = scrollContainer.scrollLeft;
-              const scrollTop = scrollContainer.scrollTop;
-              
-              ghostRef.current.widget.style.left = `${coordinates.left - scrollLeft + editorRect.left}px`;
-              ghostRef.current.widget.style.top = `${coordinates.top - scrollTop + editorRect.top}px`;
-            }
-          }
-        }
-      }
-    };
-
-    editor.onDidScrollChange(updateWidgetPosition);
-
-    // Apply enhanced editor styling
     setTimeout(() => {
       const editorContainer = editor.getDomNode();
       if (editorContainer) {
@@ -530,11 +597,10 @@ const CodeEditor = ({
     }, 100);
   };
 
-  // UI Helper Functions with enhanced feedback
   const openMonacoFind = (q = '') => {
     const editor = editorInstanceRef.current;
     if (!editor) return;
-    
+
     try {
       editor.getAction('actions.find').run();
       setTimeout(() => {
@@ -553,18 +619,18 @@ const CodeEditor = ({
     if (editingHostOnly && !isHost) return message.warn('Only the host can upload files.');
     const filesArr = Array.from(event.target.files || []);
     if (filesArr.length === 0) return;
-    
+
     const validExtensions = ['.cpp', '.c', '.h', '.hpp', '.java', '.py', '.js', '.ts', '.html', '.css', '.txt'];
     const validFiles = filesArr.filter(file => {
       const ext = '.' + file.name.split('.').pop().toLowerCase();
       return validExtensions.includes(ext);
     });
-    
+
     if (validFiles.length === 0) {
       message.error('No valid files selected. Supported formats: ' + validExtensions.join(', '));
       return;
     }
-    
+
     if (onUploadFiles) onUploadFiles(validFiles);
     if (fileInputRef.current) fileInputRef.current.value = '';
     message.success(`Uploaded ${validFiles.length} file${validFiles.length !== 1 ? 's' : ''}`);
@@ -574,12 +640,12 @@ const CodeEditor = ({
     if (editingHostOnly && !isHost) return message.warn('Only the host can upload ZIP files.');
     const file = event.target.files?.[0];
     if (!file) return;
-    
+
     if (!file.name.toLowerCase().endsWith('.zip')) {
       message.error('Please select a valid ZIP file');
       return;
     }
-    
+
     if (onUploadZip) onUploadZip(file);
     if (zipInputRef.current) zipInputRef.current.value = '';
     message.success('ZIP file uploaded successfully');
@@ -600,12 +666,12 @@ const CodeEditor = ({
           });
         }
       };
-      
+
       const root = fileTree?.root;
       if (root && root.children) {
         root.children.forEach(cid => addToZip(fileTree[cid], ''));
       }
-      
+
       const blob = await zip.generateAsync({ type: 'blob' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -613,12 +679,12 @@ const CodeEditor = ({
       a.download = `project-${Date.now()}.zip`;
       document.body.appendChild(a);
       a.click();
-      
+
       setTimeout(() => {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
       }, 150);
-      
+
       message.success('Project downloaded successfully!');
     } catch (err) {
       console.error(err);
@@ -626,13 +692,105 @@ const CodeEditor = ({
     }
   };
 
-  // Enhanced menu items with better styling
+  // Handle Run button click - opens sidebar to compiler panel
+  const handleRunClick = () => {
+    if (handleRun) {
+      handleRun();
+    }
+    // Automatically open sidebar to compiler panel
+    if (onOpenSidebarPanel) {
+      onOpenSidebarPanel('compiler');
+    }
+  };
+
+  // Handle New File - shows modal
+  const handleNewFileClick = () => {
+    if (editingHostOnly && !isHost) {
+      return message.warn('Only the host can create files.');
+    }
+
+    const parentNodeId = selectedNodeId || 'root';
+    const parentNode = fileTree[parentNodeId];
+
+    if (!parentNode || parentNode.type !== 'folder') {
+      message.error('Please select a folder first');
+      return;
+    }
+
+    setCreateModal({
+      visible: true,
+      type: 'file',
+      parentNodeId: parentNodeId,
+      parentNode: parentNode
+    });
+  };
+
+  // Handle New Folder - shows modal
+  const handleNewFolderClick = () => {
+    if (editingHostOnly && !isHost) {
+      return message.warn('Only the host can create folders.');
+    }
+
+    const parentNodeId = selectedNodeId || 'root';
+    const parentNode = fileTree[parentNodeId];
+
+    if (!parentNode || parentNode.type !== 'folder') {
+      message.error('Please select a folder first');
+      return;
+    }
+
+    setCreateModal({
+      visible: true,
+      type: 'folder',
+      parentNodeId: parentNodeId,
+      parentNode: parentNode
+    });
+  };
+
+  // Handle modal confirm
+  const handleModalConfirm = (itemName) => {
+    if (createModal.type === 'file') {
+      if (onNewFile) {
+        onNewFile(createModal.parentNodeId, itemName);
+      }
+    } else {
+      if (onNewFolder) {
+        onNewFolder(createModal.parentNodeId, itemName);
+      }
+    }
+    setCreateModal({ ...createModal, visible: false });
+  };
+
+  // Handle modal cancel
+  const handleModalCancel = () => {
+    setCreateModal({ ...createModal, visible: false });
+  };
+
+  // Get existing names for validation
+  const getModalExistingNames = () => {
+    if (typeof getExistingNames === 'function') {
+      return getExistingNames(createModal.parentNodeId);
+    }
+
+    // Fallback: get names from fileTree
+    if (!createModal.parentNodeId || !fileTree[createModal.parentNodeId]) {
+      return [];
+    }
+
+    const parentNode = fileTree[createModal.parentNodeId];
+    if (!parentNode.children) {
+      return [];
+    }
+
+    return parentNode.children.map(childId => fileTree[childId]?.name).filter(Boolean);
+  };
+
   const collapsedMenuItems = [
     { key: 'search', label: <button className="w-full text-left px-3 py-2 text-slate-200 hover:text-cyan-400 hover:bg-slate-700/50 transition-all duration-200 rounded-md" onClick={() => openMonacoFind(searchQuery)}>Search…</button> },
     { key: 'theme-dark', label: <button className="w-full text-left px-3 py-2 text-slate-200 hover:text-cyan-400 hover:bg-slate-700/50 transition-all duration-200 rounded-md" onClick={() => onThemeChange && onThemeChange('vs-dark')}>Theme: Dark</button> },
     { key: 'theme-light', label: <button className="w-full text-left px-3 py-2 text-slate-200 hover:text-cyan-400 hover:bg-slate-700/50 transition-all duration-200 rounded-md" onClick={() => onThemeChange && onThemeChange('vs')}>Theme: Light</button> },
-    { key: 'font-monaco', label: <button className="w-full text-left px-3 py-2 text-slate-200 hover:text-cyan-400 hover:bg-slate-700/50 transition-all duration-200 rounded-md" onClick={() => onFontFamilyChange && onFontFamilyChange('Monaco, Menlo, \"Ubuntu Mono\", monospace')}>Font: Monaco</button> },
-    { key: 'font-fira', label: <button className="w-full text-left px-3 py-2 text-slate-200 hover:text-cyan-400 hover:bg-slate-700/50 transition-all duration-200 rounded-md" onClick={() => onFontFamilyChange && onFontFamilyChange('\"Fira Code\", \"Cascadia Code\", \"JetBrains Mono\", monospace')}>Font: Fira Code</button> },
+    { key: 'font-monaco', label: <button className="w-full text-left px-3 py-2 text-slate-200 hover:text-cyan-400 hover:bg-slate-700/50 transition-all duration-200 rounded-md" onClick={() => onFontFamilyChange && onFontFamilyChange('Monaco, Menlo, "Ubuntu Mono", monospace')}>Font: Monaco</button> },
+    { key: 'font-fira', label: <button className="w-full text-left px-3 py-2 text-slate-200 hover:text-cyan-400 hover:bg-slate-700/50 transition-all duration-200 rounded-md" onClick={() => onFontFamilyChange && onFontFamilyChange('"Fira Code", "Cascadia Code", "JetBrains Mono", monospace')}>Font: Fira Code</button> },
     { key: 'dec-font', label: <button className="w-full text-left px-3 py-2 text-slate-200 hover:text-cyan-400 hover:bg-slate-700/50 transition-all duration-200 rounded-md" onClick={() => onDecreaseFontSize && onDecreaseFontSize()}>Decrease font</button> },
     { key: 'inc-font', label: <button className="w-full text-left px-3 py-2 text-slate-200 hover:text-cyan-400 hover:bg-slate-700/50 transition-all duration-200 rounded-md" onClick={() => onIncreaseFontSize && onIncreaseFontSize()}>Increase font</button> },
     { key: 'word-wrap', label: <button className="w-full text-left px-3 py-2 text-slate-200 hover:text-cyan-400 hover:bg-slate-700/50 transition-all duration-200 rounded-md" onClick={() => setWordWrap(w => !w)}>{wordWrap ? 'Disable Word Wrap' : 'Enable Word Wrap'}</button> },
@@ -705,6 +863,30 @@ const CodeEditor = ({
         {/* Enhanced Toolbar */}
         <div className="code-editor-toolbar">
           <Space size="small" className="toolbar-left">
+            {/* New File Button */}
+            <Tooltip title={readOnly ? 'Read-only (host-only editing enabled)' : 'New File'} color="#0f172a">
+              <Button
+                type="text"
+                icon={<FileAddOutlined className="button-icon file-add-icon" />}
+                onClick={handleNewFileClick}
+                disabled={readOnly}
+                className={getEnhancedButtonClassName()}
+              />
+            </Tooltip>
+
+            {/* New Folder Button */}
+            <Tooltip title={readOnly ? 'Read-only (host-only editing enabled)' : 'New Folder'} color="#0f172a">
+              <Button
+                type="text"
+                icon={<FolderAddOutlined className="button-icon folder-add-icon" />}
+                onClick={handleNewFolderClick}
+                disabled={readOnly}
+                className={getEnhancedButtonClassName()}
+              />
+            </Tooltip>
+
+            
+
             <Tooltip title={readOnly ? 'Read-only (host-only editing enabled)' : 'Upload Files'} color="#0f172a">
               <Button
                 type="text"
@@ -743,7 +925,7 @@ const CodeEditor = ({
             <Tooltip title="Download Project as ZIP" color="#0f172a">
               <Button
                 type="text"
-                icon={<FolderOutlined className="button-icon folder-icon" />}
+                icon={<DownloadOutlined className="button-icon folder-icon" />}
                 onClick={handleDownloadProject}
                 className={getEnhancedButtonClassName()}
               />
@@ -757,26 +939,43 @@ const CodeEditor = ({
                 className={getEnhancedButtonClassName()}
               />
             </Tooltip>
+
+            <div className="toolbar-divider" />
+
+            {/* Run Button */}
+      
+<Tooltip title="Run" color="#0f172a">
+  <Button
+    type="text"  // Changed from "primary" to "text"
+    icon={<PlayCircleOutlined className="button-icon play-icon" /> }
+    onClick={handleRunClick}
+    loading={runCodeDisabled}
+    disabled={runCodeDisabled}
+    className={getEnhancedButtonClassName()}
+  >
+    {!collapsedToolbar && (runCodeDisabled ? 'Running' : 'Run')}
+  </Button>
+</Tooltip>
+
+            <div className="toolbar-divider" />
           </Space>
 
-         <div className="toolbar-right">
-  {!collapsedToolbar && (
-    <Tooltip title="Open Monaco Search" color="#0f172a">
-    <Button
-      type="text"
-      icon={<FaSearch className="button-icon search-icon " />}
-      onClick={() => openMonacoFind(searchQuery)}
-      className={getEnhancedButtonClassName("search-button")}
-    />
-  </Tooltip>
-  )}
-
-          
+          <div className="toolbar-right">
+            {!collapsedToolbar && (
+              <Tooltip title="Open Monaco Search" color="#0f172a">
+                <Button
+                  type="text"
+                  icon={<FaSearch className="button-icon search-icon" />}
+                  onClick={() => openMonacoFind(searchQuery)}
+                  className={getEnhancedButtonClassName("search-button")}
+                />
+              </Tooltip>
+            )}
 
             {!collapsedToolbar ? (
               <Space size="small" className="toolbar-controls">
                 <div className="toolbar-divider" />
-                
+
                 <Dropdown
                   menu={{
                     items: [
@@ -910,7 +1109,7 @@ const CodeEditor = ({
                 onMount={handleEditorMount}
                 onChange={onEditorChange}
               />
-              
+
               {/* Editor overlay effects */}
               <div className="editor-overlay" />
             </div>
@@ -949,6 +1148,7 @@ const CodeEditor = ({
               </span>
             )}
           </div>
+          
 
           <div className="status-right">
             <span className="cursor-position">
@@ -956,20 +1156,474 @@ const CodeEditor = ({
             </span>
 
             <span className="spaces-status">Spaces: 2</span>
-
+            {/* ADD SAVING INDICATOR */}
+<div className="saving-indicator-container">
+  {isSaving ? (
+    <div className="saving-indicator saving">
+      <div className="saving-spinner"></div>
+      <span className="saving-text">Saving...</span>
+    </div>
+  ) : (
+    <div className="saving-indicator saved">
+      <div className="saved-icon">✓</div>
+      <span className="saving-text">Saved</span>
+    </div>
+  )}
+</div>
             {isAiLoading && (
               <span className="ai-status">
                 <div className="ai-loading-spinner" />
                 <span className="ai-text">AI</span>
               </span>
             )}
-
-            
           </div>
         </div>
       </div>
 
+      {/* Create Item Modal */}
+      <CreateItemModal
+        visible={createModal.visible}
+        onCancel={handleModalCancel}
+        onConfirm={handleModalConfirm}
+        type={createModal.type}
+        parentNode={createModal.parentNode}
+        existingNames={getModalExistingNames()}
+      />
+    
       <style jsx>{`
+      /* ==========================
+   Footer Saving Indicator Styles
+   ========================== */
+.saving-indicator-container {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  padding: 2px 10px;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(14, 165, 164, 0.2);
+  backdrop-filter: blur(8px);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.saving-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  transition: all 0.3s ease;
+}
+
+.saving-indicator.saving {
+  color: #0ea5a4;
+}
+
+.saving-indicator.saved {
+  color: #10b981;
+}
+
+.saving-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-top: 2px solid transparent;
+  border-radius: 50%;
+  animation: savingSpin 1s linear infinite;
+  filter: drop-shadow(0 0 4px rgba(14, 165, 164, 0.3));
+}
+
+.saved-icon {
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: bold;
+  background: rgba(16, 185, 129, 0.1);
+  border-radius: 50%;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  animation: savedPulse 2s ease-in-out infinite;
+}
+
+.saving-text {
+  font-size: 9px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Enhanced animations */
+@keyframes savingSpin {
+  0% { 
+    transform: rotate(0deg); 
+    border-color: #0ea5a4;
+    border-top-color: transparent;
+  }
+  50% { 
+    border-color: #06d6a0;
+    border-top-color: transparent;
+  }
+  100% { 
+    transform: rotate(360deg); 
+    border-color: #0ea5a4;
+    border-top-color: transparent;
+  }
+}
+
+@keyframes savedPulse {
+  0%, 100% { 
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4);
+  }
+  50% { 
+    opacity: 0.8;
+    box-shadow: 0 0 0 4px rgba(16, 185, 129, 0);
+  }
+}
+
+/* Hover effects */
+.saving-indicator-container:hover {
+  background: rgba(15, 23, 42, 0.9);
+  border-color: rgba(14, 165, 164, 0.4);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(14, 165, 164, 0.15);
+}
+
+.saving-indicator.saving:hover .saving-spinner {
+  animation-duration: 0.6s;
+  filter: drop-shadow(0 0 6px rgba(14, 165, 164, 0.5));
+}
+
+.saving-indicator.saved:hover .saved-icon {
+  animation-duration: 1s;
+  background: rgba(16, 185, 129, 0.2);
+  transform: scale(1.1);
+}
+
+/* Status bar integration */
+.status-bar .saving-indicator-container {
+  margin-left: 16px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(14, 165, 164, 0.15);
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .saving-indicator-container {
+    padding: 3px 8px;
+    margin-left: 12px;
+  }
+  
+  .saving-indicator {
+    gap: 6px;
+  }
+  
+  .saving-spinner {
+    width: 10px;
+    height: 10px;
+    border-width: 1.5px;
+  }
+  
+  .saved-icon {
+    width: 12px;
+    height: 12px;
+    font-size: 9px;
+  }
+  
+  .saving-text {
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  .saving-indicator-container {
+    padding: 2px 6px;
+    margin-left: 8px;
+  }
+  
+  .saving-text {
+    font-size: 9px;
+    letter-spacing: 0.2px;
+  }
+}
+
+/* Performance optimizations */
+.saving-spinner,
+.saved-icon {
+  will-change: transform, opacity;
+  transform: translateZ(0);
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .saving-indicator-container {
+    border-width: 2px;
+  }
+  
+  .saving-spinner {
+    border-width: 3px;
+  }
+  
+  .saved-icon {
+    border-width: 2px;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .saving-spinner {
+    animation: none;
+    border-top-color: currentColor;
+  }
+  
+  .saved-icon {
+    animation: none;
+  }
+  
+  .saving-indicator-container:hover {
+    transform: none;
+  }
+}
+      /* ==========================
+   Terminal & Run Button Matching Styles
+   ========================== */
+
+/* Ensure both terminal and run buttons have identical styling */
+.enhanced-button .terminal-icon,
+.enhanced-button .play-icon {
+  font-size: 13px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  z-index: 1;
+  display: inline-block;
+  vertical-align: middle;
+  transform-origin: center;
+  will-change: transform;
+}
+
+/* Hover effects for both icons */
+.enhanced-button:hover .terminal-icon,
+.enhanced-button:hover .play-icon {
+  transform: translateY(-1px) scale(1.1);
+  color: #0ea5a4 !important;
+  
+}
+
+/* Specific animation for play icon to match terminal icon behavior */
+.enhanced-button:hover .play-icon {
+  animation: playIconHover 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes playIconHover {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-2px) scale(1.15);
+  }
+  100% {
+    transform: translateY(-1px) scale(1.1);
+  }
+}
+
+/* Loading state for run button - subtle pulse to match terminal aesthetic */
+.run-button.enhanced-button.ant-btn-loading {
+  position: relative;
+  overflow: hidden;
+}
+
+.run-button.enhanced-button.ant-btn-loading::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(14, 165, 164, 0.1), transparent);
+  animation: loadingShimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes loadingShimmer {
+  0% {
+    left: -100%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+/* Disabled state matching */
+.enhanced-button:disabled .terminal-icon,
+.enhanced-button:disabled .play-icon {
+  opacity: 0.4;
+  transform: none !important;
+  animation: none !important;
+}
+
+/* Ensure both buttons have identical layout and spacing */
+.toolbar-left .enhanced-button,
+.toolbar-right .enhanced-button {
+  min-width: 32px !important;
+  min-height: 32px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+/* Remove any text content from run button to match terminal button */
+.enhanced-button .ant-btn-loading-icon + span,
+.enhanced-button > span:not(.ant-btn-icon) {
+  display: none !important;
+}
+      
+      /* Create File Button */
+.modal-file-create-btn {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  padding: 8px 20px !important;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.9), rgba(37, 99, 235, 0.8)) !important;
+  border: 1px solid rgba(59, 130, 246, 0.3) !important;
+  color: white !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  cursor: pointer !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  backdrop-filter: blur(8px) !important;
+  position: relative !important;
+  overflow: hidden !important;
+  min-width: 100px !important;
+}
+
+.modal-file-create-btn:hover {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 1), rgba(37, 99, 235, 0.9)) !important;
+  border-color: rgba(59, 130, 246, 0.5) !important;
+  transform: translateY(-2px) scale(1.05) !important;
+  box-shadow: 0 8px 25px rgba(59, 130, 246, 0.4) !important;
+}
+
+/* Create Folder Button */
+.modal-folder-create-btn {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  padding: 8px 20px !important;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.9), rgba(217, 119, 6, 0.8)) !important;
+  border: 1px solid rgba(245, 158, 11, 0.3) !important;
+  color: white !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  cursor: pointer !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  backdrop-filter: blur(8px) !important;
+  position: relative !important;
+  overflow: hidden !important;
+  min-width: 120px !important;
+}
+
+.modal-folder-create-btn:hover {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 1), rgba(217, 119, 6, 0.9)) !important;
+  border-color: rgba(245, 158, 11, 0.5) !important;
+  transform: translateY(-2px) scale(1.05) !important;
+  box-shadow: 0 8px 25px rgba(245, 158, 11, 0.4) !important;
+}
+
+/* Button shimmer effects */
+.modal-file-create-btn::before,
+.modal-folder-create-btn::before {
+  content: '' !important;
+  position: absolute !important;
+  top: 0 !important;
+  left: -100% !important;
+  width: 100% !important;
+  height: 100% !important;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent) !important;
+  transition: left 0.5s !important;
+}
+
+.modal-file-create-btn:hover::before,
+.modal-folder-create-btn:hover::before {
+  left: 100% !important;
+}
+
+/* Modal animations */
+@keyframes modalEnter {
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes modalHeaderEnter {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes modalContentEnter {
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-fadeInUp {
+  animation: fadeInUp 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.animate-pulse-once {
+  animation: pulseOnce 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes pulseOnce {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.modal-content-inner {
+  opacity: 0;
+  animation: modalContentInner 0.3s ease 0.2s forwards;
+}
+
+@keyframes modalContentInner {
+  to {
+    opacity: 1;
+  }
+}
+
+/* File/Folder specific terminal toggle animations */
+.create-item-modal .terminal-toggle {
+  animation: gentleBounce 2s ease-in-out infinite !important;
+}
+
+@keyframes gentleBounce {
+  0%, 100% { transform: scale(1) translateY(0); }
+  50% { transform: scale(1.05) translateY(-1px); }
+}
         /* ==========================
            Main Container & Layout
            ========================== */
@@ -1154,6 +1808,9 @@ const CodeEditor = ({
         }
 
         .terminal-icon {
+          transform-origin: bottom center;
+        }
+        .play-icon {
           transform-origin: bottom center;
         }
 
