@@ -649,24 +649,48 @@ export const useVideoChat = (roomId, userName) => {
 
   // mic/camera toggles
   const toggleMic = useCallback(() => {
-    if (!localStreamRef.current) return;
-    const newState = !isMicOn;
-    localStreamRef.current.getAudioTracks().forEach(t => t.enabled = newState);
-    setIsMicOn(newState);
-    try {
-      sendToServer({ type: 'media-update', data: { isMicOn: newState, isCameraOn } });
-    } catch (e) {}
-  }, [isMicOn, isCameraOn, sendToServer]);
+  const currentStream = isScreenSharing && screenStreamRef.current 
+    ? screenStreamRef.current 
+    : cameraStreamRef.current;
+    
+  if (!currentStream) return;
+  
+  const newState = !isMicOn;
+  
+  currentStream.getAudioTracks().forEach(t => t.enabled = newState);
+  
+  try {
+    sessionStorage.setItem('codecrew-mic-on', String(newState));
+  } catch (e) {}
+  
+  setIsMicOn(newState);
+  
+  try {
+    sendToServer({ type: 'media-update', data: { isMicOn: newState, isCameraOn } });
+  } catch (e) {}
+}, [isMicOn, isCameraOn, sendToServer, isScreenSharing]);
 
   const toggleCamera = useCallback(() => {
-    if (!localStreamRef.current) return;
-    const newState = !isCameraOn;
-    localStreamRef.current.getVideoTracks().forEach(t => t.enabled = newState);
-    setIsCameraOn(newState);
-    try {
-      sendToServer({ type: 'media-update', data: { isCameraOn: newState, isMicOn } });
-    } catch (e) {}
-  }, [isCameraOn, isMicOn, sendToServer]);
+  const currentStream = isScreenSharing && screenStreamRef.current 
+    ? screenStreamRef.current 
+    : cameraStreamRef.current;
+    
+  if (!currentStream) return;
+  
+  const newState = !isCameraOn;
+  
+  currentStream.getVideoTracks().forEach(t => t.enabled = newState);
+  
+  try {
+    sessionStorage.setItem('codecrew-camera-on', String(newState));
+  } catch (e) {}
+  
+  setIsCameraOn(newState);
+  
+  try {
+    sendToServer({ type: 'media-update', data: { isCameraOn: newState, isMicOn } });
+  } catch (e) {}
+}, [isCameraOn, isMicOn, sendToServer, isScreenSharing]);
 
   const handlePinPeer = useCallback((peerId) => {
     setPinnedPeerId(current => (current === peerId ? null : peerId));
