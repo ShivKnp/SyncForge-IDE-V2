@@ -358,31 +358,7 @@ const [activeSidebarPanel, setActiveSidebarPanel] = useState(() => {
   }, [toggleTerminal, terminalVisible]);
 
   // Media state restoration
-  useEffect(() => {
-    if (!videoHookReady || !videoHook) return;
-    
-    const timer = setTimeout(() => {
-      const savedMic = sessionStorage.getItem('codecrew-mic-on');
-      if (savedMic !== null) {
-        const micOn = savedMic === 'true';
-        if (micOn !== videoHook.isMicOn) {
-          console.log(`Restoring mic state: ${micOn}`);
-          videoHook.toggleMic();
-        }
-      }
-      
-      const savedCamera = sessionStorage.getItem('codecrew-camera-on');
-      if (savedCamera !== null) {
-        const cameraOn = savedCamera === 'true';
-        if (cameraOn !== videoHook.isCameraOn) {
-          console.log(`Restoring camera state: ${cameraOn}`);
-          videoHook.toggleCamera();
-        }
-      }
-    }, 500);
-    
-    return () => clearTimeout(timer);
-  }, [videoHookReady, videoHook]);
+ 
 
   useEffect(() => {
     if (state.config) {
