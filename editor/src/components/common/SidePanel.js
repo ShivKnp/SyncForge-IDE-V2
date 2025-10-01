@@ -311,14 +311,21 @@ const SidePanel = ({
                 animate={{ opacity: hoverStates.output ? 1 : 0.8 }}
                 transition={{ duration: 0.2 }}
               >
+
                 <div className="output-length">
                   {output ? `${(output || '').length} chars` : 'No output yet'}
                 </div>
+                
+ 
                 <div className="encoding-badge">UTF-8</div>
+                 
               </motion.div>
+              
             </div>
           </motion.div>
+          
         </div>
+        
       </motion.aside>
 
       <style jsx>{`
