@@ -54,11 +54,18 @@ const useEditorState = (id, userName) => {
     docLoaded: false,
     whiteboards: {},
     whiteboardConfig: {},
+    isSaving: false,
+  lastSaved: null,
+  hasUnsavedChanges: false
     
   });
 
   const stateRef = useRef(state);
   useEffect(() => { stateRef.current = state; }, [state]);
+
+  const [isSaving, setIsSaving] = useState(false);
+const [lastSaved, setLastSaved] = useState(null);
+const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   const docRef = useRef(null);
   const bindingRef = useRef(null);
@@ -86,6 +93,28 @@ const useEditorState = (id, userName) => {
       return child && child.name === name && child.type === type;
     });
   };
+
+  // Enhanced StringBinding import with fallbacks
+let StringBinding;
+try {
+  // Try multiple possible import paths
+  const StringBindingModule = require('../lib/StringBinding');
+  StringBinding = StringBindingModule.default || StringBindingModule;
+  
+  if (typeof StringBinding !== 'function') {
+    console.warn('StringBinding import is not a constructor, using fallback');
+    StringBinding = null;
+  }
+} catch (error) {
+  console.warn('StringBinding module import failed, real-time sync disabled:', error);
+  StringBinding = null;
+}
+
+// Fallback to global if available
+if (!StringBinding && typeof window !== 'undefined' && window.StringBinding) {
+  StringBinding = window.StringBinding;
+  console.log('Using global StringBinding');
+}
 
   useEffect(() => {
     if (!userName) {
@@ -161,38 +190,237 @@ const useEditorState = (id, userName) => {
       check();
     });
   };
+  
 
-  const saveActiveEditorContent = async () => {
-    try {
-      const curState = stateRef.current;
-      const activeId = curState.activeFileId;
-      if (!activeId || !docRef.current) return;
-      const editor = editorRef.current;
-      let currentText = '';
-      if (editor && editor.getModel) {
-        const model = editor.getModel();
-        if (model) currentText = model.getValue();
-      } else {
-        currentText = (docRef.current.data && docRef.current.data.contents && docRef.current.data.contents[activeId]) || '';
+const safeSubmitOp = async (ops, meta) => {
+  try {
+    if (!docRef.current || !docRef.current.type) {
+      console.warn('safeSubmitOp: No document or document type');
+      return false; // Return success indicator
+    }
+
+    const submitWithRetry = async (retryCount = 0) => {
+      try {
+        // CRITICAL: Wrap in promise to make it truly async
+        await new Promise((resolve, reject) => {
+          docRef.current.submitOp(ops, meta, (err) => {
+            if (err) reject(err);
+            else resolve();
+          });
+        });
+        return true;
+      } catch (error) {
+        const isVersionConflict = error.message && 
+          (error.message.includes('version') || 
+           error.message.includes('newer than current snapshot') ||
+           (error.code && error.code === 4001));
+        
+        if (isVersionConflict && retryCount < 5) { // Increased retries for bulk ops
+          console.warn(`Version conflict, retrying (${retryCount + 1}/5)...`);
+          
+          // Fetch fresh document state
+          await new Promise((resolve, reject) => {
+            docRef.current.fetch((fetchError) => {
+              if (fetchError) reject(fetchError);
+              else resolve();
+            });
+          });
+          
+          // Exponential backoff
+          await new Promise(resolve => setTimeout(resolve, 150 * (retryCount + 1)));
+          return submitWithRetry(retryCount + 1);
+        } else {
+          throw error;
+        }
       }
+    };
 
-      const existing = (docRef.current.data && docRef.current.data.contents && docRef.current.data.contents[activeId]) || '';
-      if (existing === currentText) return;
-      safeSubmitOp([{ p: ['contents', activeId], oi: currentText }], { source: 'autosave' });
-    } catch (e) {
-      console.warn('saveActiveEditorContent failed', e);
+    return await submitWithRetry();
+  } catch (error) {
+    console.error('safeSubmitOp failed after retries:', error, ops);
+    return false;
+  }
+};
+
+// Add this function to ensure document synchronization
+const ensureDocSync = async () => {
+  if (!docRef.current) return false;
+  
+  try {
+    await new Promise((resolve, reject) => {
+      docRef.current.fetch((err) => {
+        if (err) {
+          console.warn('Document fetch failed:', err);
+          reject(err);
+        } else {
+          console.log('Document synchronized successfully');
+          resolve();
+        }
+      });
+    });
+    return true;
+  } catch (error) {
+    console.error('Document synchronization failed:', error);
+    return false;
+  }
+};
+
+
+
+  // Update the saveActiveEditorContent function
+const saveActiveEditorContent = async () => {
+  try {
+    const curState = stateRef.current;
+    const activeId = curState.activeFileId;
+    if (!activeId || !docRef.current) return;
+
+    setIsSaving(true);
+    setHasUnsavedChanges(true);
+
+    const editor = editorRef.current;
+    let currentText = '';
+    if (editor && editor.getModel) {
+      const model = editor.getModel();
+      if (model) currentText = model.getValue();
+    } else {
+      currentText = (docRef.current.data && docRef.current.data.contents && docRef.current.data.contents[activeId]) || '';
     }
-  };
 
-  // safe submit helper
-  const safeSubmitOp = (ops, meta) => {
+    const existing = (docRef.current.data && docRef.current.data.contents && docRef.current.data.contents[activeId]) || '';
+    if (existing === currentText) {
+      setIsSaving(false);
+      return;
+    }
+
+    const success = await safeSubmitOp([{ p: ['contents', activeId], oi: currentText }], { source: 'autosave' });
+    
+    if (success) {
+      setLastSaved(new Date());
+      setHasUnsavedChanges(false);
+      console.log(`[save] Successfully saved file ${activeId}`);
+    } else {
+      console.warn(`[save] Failed to save file ${activeId}`);
+    }
+  } catch (e) {
+    console.warn('saveActiveEditorContent failed', e);
+  } finally {
+    setIsSaving(false);
+  }
+};
+
+// Add auto-save on tab change
+const handleTabChangeWithSave = async (fileId) => {
+  console.log('handleTabChange called for file:', fileId);
+  
+  if (!fileId) {
+    console.warn('handleTabChange: No fileId provided');
+    return;
+  }
+
+  // Save current file content before switching
+  try {
+    await saveActiveEditorContent();
+  } catch (e) {
+    console.warn('handleTabChange: Failed to save current content', e);
+  }
+
+  // Update state immediately for responsive UI
+  setState(prev => ({ ...prev, activeFileId: fileId }));
+
+  try {
+    // Persist active file to shared document
+    if (docRef.current && docRef.current.type) {
+      await safeSubmitOp([{ p: ['activeFileId'], oi: fileId }], { source: 'tab-change', critical: true });
+    }
+  } catch (error) {
+    console.warn('handleTabChange: Failed to persist activeFileId', error);
+  }
+
+  try {
+    if (!docRef.current) {
+      console.warn('handleTabChange: No document reference');
+      return;
+    }
+
+    // Update presence
     try {
-      if (docRef.current && docRef.current.type) docRef.current.submitOp(ops, meta);
-      else console.warn('safeSubmitOp: no doc or doc has no type', ops);
-    } catch (e) {
-      console.warn('safeSubmitOp failed', e, ops);
+      if (!localPresenceRef.current) {
+        const presence = connectionRef.current.getPresence(`presence-${id}`);
+        if (presence) {
+          presence.subscribe();
+          localPresenceRef.current = presence.create();
+          localPresenceRef.current.submit({ 
+            name: stateRef.current.userName, 
+            editingFile: fileId 
+          });
+        }
+      } else {
+        localPresenceRef.current.submit({ 
+          editingFile: fileId, 
+          name: stateRef.current.userName 
+        });
+      }
+    } catch (presenceError) {
+      console.warn('handleTabChange: Presence update failed', presenceError);
     }
-  };
+
+    // Detach old binding first to preserve undo/redo
+    if (bindingRef.current && typeof bindingRef.current.detach === 'function') {
+      try {
+        bindingRef.current.detach();
+      } catch (detachErr) {
+        console.warn('handleTabChange: binding detach failed', detachErr);
+      }
+    }
+
+    // Handle StringBinding with robust error handling
+    if (StringBinding && typeof StringBinding === 'function') {
+      if (bindingRef.current && typeof bindingRef.current.updatePath === 'function') {
+        // Update existing binding path
+        console.log('Updating existing binding to path:', ['contents', fileId]);
+        bindingRef.current.updatePath(['contents', fileId]);
+        
+        // Re-attach to editor to preserve undo/redo stack
+        if (editorRef.current) {
+          try {
+            bindingRef.current.attach(editorRef.current);
+          } catch (attachErr) {
+            console.warn('handleTabChange: binding re-attach failed', attachErr);
+          }
+        }
+      } else {
+        // Create new binding
+        console.log('Creating new StringBinding for path:', ['contents', fileId]);
+        try {
+          const newBinding = new StringBinding(
+            docRef.current, 
+            ['contents', fileId], 
+            localPresenceRef.current
+          );
+          
+          bindingRef.current = newBinding;
+          setState(s => ({ ...s, binding: newBinding }));
+          
+          if (editorRef.current) {
+            newBinding.attach(editorRef.current);
+          }
+        } catch (bindingError) {
+          console.error('handleTabChange: StringBinding creation failed', bindingError);
+          bindingRef.current = null;
+          // Continue without binding - editor will still work
+        }
+      }
+    } else {
+      console.warn('StringBinding not available, continuing without real-time sync');
+      bindingRef.current = null;
+    }
+  } catch (error) {
+    console.error('handleTabChange: General error', error);
+    // Don't prevent tab change on errors
+  }
+};
+  // safe submit helper
+ 
 
   // Consolidated ShareDB + websocket setup with proper cleanup
   useEffect(() => {
@@ -488,180 +716,199 @@ const useEditorState = (id, userName) => {
       } catch (e) { /* ignore */ }
     },
 
+    // Add this helper inside actions object
+ensureFolderPathSequential: async (segments, localTree) => {
+  let currentParent = 'root';
+  
+  for (const seg of segments) {
+    if (!seg) continue;
+    
+    // Refresh tree state
+    await ensureDocSync();
+    const freshTree = docRef.current.data.tree;
+    
+    // Check if folder exists
+    const found = (freshTree[currentParent]?.children || []).find(childId => {
+      const child = freshTree[childId];
+      return child && child.name === seg && child.type === 'folder';
+    });
+    
+    if (found) {
+      currentParent = found;
+      continue;
+    }
+    
+    // Create new folder
+    const newFolderId = uuidv4();
+    const folderNode = { id: newFolderId, parentId: currentParent, name: seg, type: 'folder', children: [] };
+    
+    const parentChildren = freshTree[currentParent]?.children || [];
+    const ops = [{ p: ['tree', newFolderId], oi: folderNode }];
+    
+    if (parentChildren.length > 0) {
+      ops.push({ p: ['tree', currentParent, 'children', parentChildren.length], li: newFolderId });
+    } else {
+      ops.push({ p: ['tree', currentParent, 'children'], oi: [newFolderId] });
+    }
+    
+    await safeSubmitOp(ops, { source: 'uploadZip-folder' });
+    await ensureDocSync();
+    
+    currentParent = newFolderId;
+  }
+  
+  return currentParent;
+},
+    
+
     editorOnChange: (newValue) => {
       // binding handles updates
     },
 
     uploadFiles: async (files) => {
-      if (!stateRef.current.docLoaded || !docRef.current) return;
+  if (!stateRef.current.docLoaded || !docRef.current) return;
 
-      const cfg = stateRef.current.config || {};
-      const editingHostOnly = cfg.editing === 'host-only';
-      const allowFileCreation = (typeof cfg.allowFileCreation === 'boolean') ? cfg.allowFileCreation : true;
+  const cfg = stateRef.current.config || {};
+  const editingHostOnly = cfg.editing === 'host-only';
+  const allowFileCreation = (typeof cfg.allowFileCreation === 'boolean') ? cfg.allowFileCreation : true;
 
-      if (editingHostOnly && !stateRef.current.isHost) {
-        return notification.warning({ message: 'Only the host can upload files.' });
+  if (editingHostOnly && !stateRef.current.isHost) {
+    return notification.warning({ message: 'Only the host can upload files.' });
+  }
+  if (!allowFileCreation) {
+    return notification.warning({ message: 'File creation is disabled for this room.' });
+  }
+
+  try {
+    await saveActiveEditorContent();
+
+    const parentId = 'root';
+    const parentNode = docRef.current.data.tree[parentId];
+    if (!parentNode) return notification.error({ message: "Root directory not found." });
+
+    // BATCH operations by file to reduce conflicts
+    for (const file of files) {
+      const reader = new FileReader();
+      const fileContent = await new Promise((resolve) => {
+        reader.onload = (e) => resolve(e.target.result);
+        reader.readAsText(file);
+      });
+
+      const newFileId = uuidv4();
+      const fileName = file.name;
+
+      // Refresh parent's children list before each file
+      const currentChildren = docRef.current.data.tree[parentId]?.children || [];
+      
+      const ops = [
+        { p: ['tree', newFileId], oi: { id: newFileId, parentId, name: fileName, type: 'file' } },
+        { p: ['contents', newFileId], oi: fileContent }
+      ];
+
+      if (currentChildren.length > 0) {
+        ops.push({ p: ['tree', parentId, 'children', currentChildren.length], li: newFileId });
+      } else {
+        ops.push({ p: ['tree', parentId, 'children'], oi: [newFileId] });
       }
-      if (!allowFileCreation) {
-        return notification.warning({ message: 'File creation is disabled for this room.' });
+
+      // CRITICAL: Submit one file at a time and wait for sync
+      const success = await safeSubmitOp(ops, { source: 'uploadFiles' });
+      
+      if (!success) {
+        notification.error({ message: `Failed to upload ${fileName}` });
+        continue;
       }
+
+      // Wait for document to sync after each file
+      await ensureDocSync();
+    }
+
+    notification.success({ message: `Uploaded ${files.length} file(s)` });
+
+  } catch (e) {
+    console.error('File upload error', e);
+    notification.error({ message: 'Failed to upload files.' });
+  }
+},
+
+
+
+
+   uploadZip: async (zipFile) => {
+  if (!stateRef.current.docLoaded || !docRef.current) return;
+
+  const cfg = stateRef.current.config || {};
+  const editingHostOnly = cfg.editing === 'host-only';
+
+  if (editingHostOnly && !stateRef.current.isHost) {
+    return notification.warning({ message: 'Only hosts can upload ZIP files.' });
+  }
+
+  try {
+    await saveActiveEditorContent();
+
+    const zip = new JSZip();
+    const zipContent = await zip.loadAsync(zipFile);
+
+    // Extract entries
+    const entries = [];
+    zipContent.forEach((relativePath, entry) => {
+      entries.push({ relativePath, entry });
+    });
+
+    // PROCESS SEQUENTIALLY to avoid version conflicts
+    for (const { relativePath, entry } of entries) {
+      if (relativePath.includes('__MACOSX/') || relativePath.includes('/._') || 
+          relativePath.endsWith('/.DS_Store') || relativePath.startsWith('.')) {
+        continue;
+      }
+
+      // Refresh tree state before each operation
+      await ensureDocSync();
+      const currentTree = { ...docRef.current.data.tree };
+
+      if (entry.dir) {
+        const parts = relativePath.split('/').filter(Boolean);
+        await ensureFolderPathSequential(parts, currentTree);
+        continue;
+      }
+
+      const parts = relativePath.split('/').filter(Boolean);
+      const fileName = parts.pop();
+      const folderId = parts.length > 0 ? await ensureFolderPathSequential(parts, currentTree) : 'root';
 
       try {
-        await saveActiveEditorContent();
+        const content = await entry.async('text');
+        const newFileId = uuidv4();
+        
+        // Fresh parent check
+        const parentChildren = docRef.current.data.tree[folderId]?.children || [];
+        
+        const ops = [
+          { p: ['tree', newFileId], oi: { id: newFileId, parentId: folderId, name: fileName, type: 'file' } },
+          { p: ['contents', newFileId], oi: content }
+        ];
 
-        const parentId = 'root';
-        const parentNode = docRef.current.data.tree[parentId];
-        if (!parentNode) return notification.error({ message: "Root directory not found." });
-
-        const ops = [];
-        // make a local copy to update children counts for ordering
-        const localTree = { ...stateRef.current.tree };
-        localTree[parentId] = { ...(localTree[parentId] || {}), children: [...(localTree[parentId]?.children || [])] };
-
-        for (const file of files) {
-          const reader = new FileReader();
-          const fileContent = await new Promise((resolve) => {
-            reader.onload = (e) => resolve(e.target.result);
-            reader.readAsText(file);
-          });
-
-          const newFileId = uuidv4();
-          const fileName = file.name;
-
-          ops.push(
-            { p: ['tree', newFileId], oi: { id: newFileId, parentId, name: fileName, type: 'file' } },
-            { p: ['contents', newFileId], oi: fileContent }
-          );
-
-          const idx = localTree[parentId].children.length;
-          if (idx > 0) {
-            ops.push({ p: ['tree', parentId, 'children', idx], li: newFileId });
-          } else {
-            ops.push({ p: ['tree', parentId, 'children'], oi: [newFileId] });
-          }
-          localTree[parentId].children.push(newFileId);
-        }
-
-        safeSubmitOp(ops, { source: 'uploadFiles' });
-        notification.success({ message: `Uploaded ${files.length} file(s)` });
-
-      } catch (e) {
-        console.error('File upload error', e);
-        notification.error({ message: 'Failed to upload files.' });
-      }
-    },
-
-    uploadZip: async (zipFile) => {
-      if (!stateRef.current.docLoaded || !docRef.current) return;
-
-      const cfg = stateRef.current.config || {};
-      const editingHostOnly = cfg.editing === 'host-only';
-
-      if (editingHostOnly && !stateRef.current.isHost) {
-        return notification.warning({ message: 'Only hosts can upload ZIP files.' });
-      }
-
-      try {
-        await saveActiveEditorContent();
-
-        const zip = new JSZip();
-        const zipContent = await zip.loadAsync(zipFile);
-        const ops = [];
-
-        const localTree = { ...(stateRef.current.tree || {}) };
-
-        const findChildByName = (parentId, name, type) => {
-          const p = localTree[parentId];
-          if (!p || !Array.isArray(p.children)) return null;
-          for (const cid of p.children) {
-            const child = localTree[cid];
-            if (child && child.name === name && child.type === type) return cid;
-          }
-          return null;
-        };
-
-        const ensureFolderPath = (segments) => {
-          let currentParent = 'root';
-          for (const seg of segments) {
-            if (!seg) continue;
-            let found = findChildByName(currentParent, seg, 'folder');
-            if (found) {
-              currentParent = found;
-              continue;
-            }
-            const newFolderId = uuidv4();
-            const folderNode = { id: newFolderId, parentId: currentParent, name: seg, type: 'folder', children: [] };
-            ops.push({ p: ['tree', newFolderId], oi: folderNode });
-            const parentChildren = localTree[currentParent]?.children || [];
-            if (parentChildren.length > 0) {
-              ops.push({ p: ['tree', currentParent, 'children', parentChildren.length], li: newFolderId });
-              localTree[currentParent] = { ...(localTree[currentParent] || {}), children: [...parentChildren, newFolderId] };
-            } else {
-              ops.push({ p: ['tree', currentParent, 'children'], oi: [newFolderId] });
-              localTree[currentParent] = { ...(localTree[currentParent] || {}), children: [newFolderId] };
-            }
-            localTree[newFolderId] = folderNode;
-            currentParent = newFolderId;
-          }
-          return currentParent;
-        };
-
-        const entries = [];
-        zipContent.forEach((relativePath, entry) => {
-          entries.push({ relativePath, entry });
-        });
-
-        for (const { relativePath, entry } of entries) {
-          if (relativePath.includes('__MACOSX/') || relativePath.includes('/._') || relativePath.endsWith('/.DS_Store') || relativePath.startsWith('.')) {
-            continue;
-          }
-          if (entry.dir) {
-            const parts = relativePath.split('/').filter(Boolean);
-            ensureFolderPath(parts);
-            continue;
-          }
-
-          const parts = relativePath.split('/').filter(Boolean);
-          const fileName = parts.pop();
-          const folderId = parts.length > 0 ? ensureFolderPath(parts) : 'root';
-
-          const duplicate = findChildByName(folderId, fileName, 'file');
-          if (duplicate) {
-            console.warn('Skipping duplicate file from zip:', relativePath);
-            continue;
-          }
-
-          try {
-            const content = await entry.async('text');
-            const newFileId = uuidv4();
-            ops.push({ p: ['tree', newFileId], oi: { id: newFileId, parentId: folderId, name: fileName, type: 'file' } });
-            ops.push({ p: ['contents', newFileId], oi: content });
-
-            const parentChildren = localTree[folderId]?.children || [];
-            if (parentChildren.length > 0) {
-              ops.push({ p: ['tree', folderId, 'children', parentChildren.length], li: newFileId });
-              localTree[folderId] = { ...(localTree[folderId] || {}), children: [...parentChildren, newFileId] };
-            } else {
-              ops.push({ p: ['tree', folderId, 'children'], oi: [newFileId] });
-              localTree[folderId] = { ...(localTree[folderId] || {}), children: [newFileId] };
-            }
-            localTree[newFileId] = { id: newFileId, parentId: folderId, name: fileName, type: 'file' };
-          } catch (readErr) {
-            console.warn('Skipping binary or unreadable file in ZIP:', relativePath, readErr);
-          }
-        }
-
-        if (ops.length > 0) {
-          safeSubmitOp(ops, { source: 'uploadZip' });
-          notification.success({ message: 'ZIP uploaded and folder structure created' });
+        if (parentChildren.length > 0) {
+          ops.push({ p: ['tree', folderId, 'children', parentChildren.length], li: newFileId });
         } else {
-          notification.info({ message: 'No new files created from ZIP' });
+          ops.push({ p: ['tree', folderId, 'children'], oi: [newFileId] });
         }
-      } catch (e) {
-        console.error('ZIP upload error', e);
-        notification.error({ message: 'Failed to upload ZIP file' });
+
+        await safeSubmitOp(ops, { source: 'uploadZip' });
+        await ensureDocSync(); // CRITICAL: Sync after each file
+
+      } catch (readErr) {
+        console.warn('Skipping unreadable file:', relativePath, readErr);
       }
-    },
+    }
+
+    notification.success({ message: 'ZIP uploaded successfully' });
+  } catch (e) {
+    console.error('ZIP upload error', e);
+    notification.error({ message: 'Failed to upload ZIP file' });
+  }
+},
 
     approveOperation: (operation) => {
       if (stateRef.current.isHost && operation && docRef.current) {
@@ -858,46 +1105,7 @@ const useEditorState = (id, userName) => {
       }
     },
 
-    handleTabChange: async (fileId) => {
-      setState(prev => ({ ...prev, activeFileId: fileId }));
-
-      try {
-        if (docRef.current && docRef.current.type) {
-          safeSubmitOp([{ p: ['activeFileId'], oi: fileId }], { source: 'tab-change' });
-        }
-      } catch (e) {
-        console.warn('persist activeFileId failed', e);
-      }
-
-      try {
-        if (!docRef.current) return;
-
-        try {
-          if (!localPresenceRef.current) {
-            const presence = connectionRef.current.getPresence(`presence-${id}`);
-            presence.subscribe();
-            const localPresence = presence.create();
-            localPresence.submit({ name: stateRef.current.userName, editingFile: fileId });
-            localPresenceRef.current = localPresence;
-          } else {
-            try { localPresenceRef.current.submit({ editingFile: fileId, name: stateRef.current.userName }); } catch (e) {}
-          }
-        } catch (e) {}
-
-        if (bindingRef.current && typeof bindingRef.current.updatePath === 'function') {
-          bindingRef.current.updatePath(['contents', fileId]);
-        } else {
-          const newBinding = new StringBinding(docRef.current, ['contents', fileId], localPresenceRef.current);
-          bindingRef.current = newBinding;
-          setState(s => ({ ...s, binding: newBinding }));
-          if (editorRef.current) {
-            try { newBinding.attach(editorRef.current); } catch (e) { console.warn('attach binding failed', e); }
-          }
-        }
-      } catch (e) {
-        console.warn('handleTabChange binding logic failed', e);
-      }
-    },
+ handleTabChange: handleTabChangeWithSave,
 
     handleFileClose: (fileId) => {
       if (!stateRef.current.docLoaded || Object.keys(stateRef.current.files).length <= 1) return notification.warning({ message: 'Cannot close the last file.' });
@@ -1464,6 +1672,54 @@ getBoardAccessLevel: (boardId) => {
 }
   };
 
+  // In useEditorState.js - enhance the auto-save to detect changes
+useEffect(() => {
+  const handleContentChange = () => {
+    if (stateRef.current.activeFileId && editorRef.current) {
+      const model = editorRef.current.getModel();
+      if (model) {
+        const currentText = model.getValue();
+        const savedText = (docRef.current?.data?.contents?.[stateRef.current.activeFileId]) || '';
+        
+        if (currentText !== savedText) {
+          setHasUnsavedChanges(true);
+        }
+      }
+    }
+  };
+
+  // Listen to editor changes
+  if (editorRef.current) {
+    const disposable = editorRef.current.onDidChangeModelContent(handleContentChange);
+    return () => disposable.dispose();
+  }
+}, [state.activeFileId]);
+
+// Enhance the autosave timer to be more responsive
+useEffect(() => {
+  autosaveTimerRef.current = setInterval(() => {
+    if (hasUnsavedChanges && !isSaving) {
+      saveActiveEditorContent();
+    }
+  }, 3000); // Save every 3 seconds if there are changes
+
+  const beforeunload = (e) => {
+    if (hasUnsavedChanges) {
+      // Optional: Warn user about unsaved changes
+      e.preventDefault();
+      e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+      return e.returnValue;
+    }
+  };
+  
+  window.addEventListener('beforeunload', beforeunload);
+
+  return () => {
+    clearInterval(autosaveTimerRef.current);
+    window.removeEventListener('beforeunload', beforeunload);
+  };
+}, [hasUnsavedChanges, isSaving]);
+
 
   // alias to allow nested actions reference
   const actionsProxy = actions;
@@ -1480,7 +1736,10 @@ getBoardAccessLevel: (boardId) => {
     actions: actionsRef, 
     handleSaveToWorkspace, 
     openTerminalInWorkspace,
-    docRef // CRITICAL: Export docRef for real-time whiteboard updates
+    docRef,
+    isSaving,
+  lastSaved,
+  hasUnsavedChanges 
   };
 };
 
