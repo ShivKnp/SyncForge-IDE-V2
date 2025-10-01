@@ -268,41 +268,83 @@ const ensureDocSync = async () => {
 
 
   // Update the saveActiveEditorContent function
-const saveActiveEditorContent = async () => {
+// Update: saveActiveEditorContent now accepts options
+// options: { force: boolean, allowEmpty: boolean }
+// - force: bypass `hasUnsavedChanges` guard (used by callers that must persist)
+// - allowEmpty: allow saving an empty string (used when caller intentionally wants empty content stored)
+const saveActiveEditorContent = async (options = {}) => {
+  const { force = false, allowEmpty = false } = options || {};
   try {
     const curState = stateRef.current;
     const activeId = curState.activeFileId;
-    if (!activeId || !docRef.current) return;
+    if (!activeId || !docRef.current) return false;
+
+    // If not forced, only persist when there are unsaved changes
+    if (!force && !hasUnsavedChanges) return false;
+
+    // Avoid saving while editor is not attached to DOM (transient during UI transitions)
+    const editor = editorRef.current;
+    if (editor && typeof editor.getDomNode === 'function') {
+      const dom = editor.getDomNode();
+      // If DOM exists but is not in the document, skip unless forced
+      if (dom && !document.contains(dom) && !force) {
+        // Editor is being unmounted or hidden — skip to avoid accidental empty saves
+        return false;
+      }
+    }
 
     setIsSaving(true);
-    setHasUnsavedChanges(true);
 
-    const editor = editorRef.current;
+    // Read current text safely
     let currentText = '';
-    if (editor && editor.getModel) {
+    if (editor && typeof editor.getModel === 'function') {
       const model = editor.getModel();
-      if (model) currentText = model.getValue();
+      if (model) {
+        currentText = model.getValue();
+      } else if (!force) {
+        // No model available and not forced => nothing to save
+        setIsSaving(false);
+        return false;
+      }
     } else {
-      currentText = (docRef.current.data && docRef.current.data.contents && docRef.current.data.contents[activeId]) || '';
+      // Fall back to doc contents if editor not available
+      currentText = (docRef.current?.data?.contents?.[activeId]) || '';
+      if (!force) {
+        // If we have no editor and no force, don't overwrite
+        setIsSaving(false);
+        return false;
+      }
     }
 
-    const existing = (docRef.current.data && docRef.current.data.contents && docRef.current.data.contents[activeId]) || '';
+    const existing = (docRef.current?.data?.contents?.[activeId]) || '';
+
+    // Prevent accidental overwrite: if currentText is empty but existing isn't,
+    // skip unless caller allowed empty or explicitly forced.
+    if (!allowEmpty && currentText === '' && existing !== '' && !force) {
+      setIsSaving(false);
+      return false;
+    }
+
+    // If nothing changed, skip
     if (existing === currentText) {
       setIsSaving(false);
-      return;
+      setHasUnsavedChanges(false);
+      return true;
     }
 
-    const success = await safeSubmitOp([{ p: ['contents', activeId], oi: currentText }], { source: 'autosave' });
-    
+    const success = await safeSubmitOp([{ p: ['contents', activeId], oi: currentText }], { source: force ? 'manual-save' : 'autosave' });
     if (success) {
       setLastSaved(new Date());
       setHasUnsavedChanges(false);
-      console.log(`[save] Successfully saved file ${activeId}`);
     } else {
-      console.warn(`[save] Failed to save file ${activeId}`);
+      // keep unsaved flag so autosave will reattempt later
+      setHasUnsavedChanges(true);
     }
+    return success;
   } catch (e) {
     console.warn('saveActiveEditorContent failed', e);
+    setHasUnsavedChanges(true);
+    return false;
   } finally {
     setIsSaving(false);
   }
@@ -319,7 +361,8 @@ const handleTabChangeWithSave = async (fileId) => {
 
   // Save current file content before switching
   try {
-    await saveActiveEditorContent();
+    await saveActiveEditorContent({ force: true, allowEmpty: true });
+
   } catch (e) {
     console.warn('handleTabChange: Failed to save current content', e);
   }
@@ -610,21 +653,7 @@ const handleTabChangeWithSave = async (fileId) => {
     };
   }, [id, userName, navigate]);
 
-  useEffect(() => {
-    autosaveTimerRef.current = setInterval(() => {
-      saveActiveEditorContent();
-    }, 5000);
-
-    const beforeunload = () => {
-      saveActiveEditorContent();
-    };
-    window.addEventListener('beforeunload', beforeunload);
-
-    return () => {
-      clearInterval(autosaveTimerRef.current);
-      window.removeEventListener('beforeunload', beforeunload);
-    };
-  }, []);
+  
 
   const handleSaveToWorkspace = async () => {
     if (!stateRef.current?.docLoaded) {
@@ -632,7 +661,8 @@ const handleTabChangeWithSave = async (fileId) => {
       return false;
     }
     try {
-      await saveActiveEditorContent();
+      await saveActiveEditorContent({ force: true, allowEmpty: true });
+
 
       notification.info({ message: 'Saving to workspace...', duration: 1.5 });
       const resp = await axios.post(`${SERVER_URL}/session/${id}/export`);
@@ -780,7 +810,8 @@ ensureFolderPathSequential: async (segments, localTree) => {
   }
 
   try {
-    await saveActiveEditorContent();
+    await saveActiveEditorContent({ force: true, allowEmpty: true });
+
 
     const parentId = 'root';
     const parentNode = docRef.current.data.tree[parentId];
@@ -845,7 +876,8 @@ ensureFolderPathSequential: async (segments, localTree) => {
   }
 
   try {
-    await saveActiveEditorContent();
+await saveActiveEditorContent({ force: true, allowEmpty: true });
+
 
     const zip = new JSZip();
     const zipContent = await zip.loadAsync(zipFile);
@@ -1016,7 +1048,8 @@ ensureFolderPathSequential: async (segments, localTree) => {
       if (!allowFileCreation) return notification.warning({ message: 'File creation is disabled for this room.' });
 
       try {
-        await saveActiveEditorContent();
+        await saveActiveEditorContent({ force: true, allowEmpty: true });
+
 
         const validParent = parentId && stateRef.current.tree[parentId] && stateRef.current.tree[parentId].type === 'folder' ? parentId : (stateRef.current.selectedNodeId && stateRef.current.tree[stateRef.current.selectedNodeId]?.type === 'folder' ? stateRef.current.selectedNodeId : 'root');
         const parentNode = docRef.current.data.tree[validParent];
@@ -1137,7 +1170,8 @@ ensureFolderPathSequential: async (segments, localTree) => {
       if (editingHostOnly && !stateRef.current.isHost) return notification.warning({ message: 'Only the host can rename files/folders.' });
 
       try {
-        await saveActiveEditorContent();
+        await saveActiveEditorContent({ force: true, allowEmpty: true });
+
         safeSubmitOp([{ p: ['tree', nodeId, 'name'], oi: newName.trim() }], { source: 'renameNode' });
       } catch (e) {
         console.warn('renameNode failed', e);
@@ -1153,7 +1187,8 @@ ensureFolderPathSequential: async (segments, localTree) => {
       if (editingHostOnly && !stateRef.current.isHost) return notification.warning({ message: 'Only the host can delete files/folders.' });
 
       try {
-        await saveActiveEditorContent();
+        await saveActiveEditorContent({ force: true, allowEmpty: true });
+
 
         const ops = [];
         const collectDeletes = (id) => {
@@ -1202,7 +1237,8 @@ ensureFolderPathSequential: async (segments, localTree) => {
   }
 
   try {
-    await saveActiveEditorContent();
+    await saveActiveEditorContent({ force: true, allowEmpty: true });
+
 
     const sourceNode = stateRef.current.tree[sourceNodeId];
     const targetNode = stateRef.current.tree[targetNodeId];
@@ -1696,22 +1732,31 @@ useEffect(() => {
 }, [state.activeFileId]);
 
 // Enhance the autosave timer to be more responsive
+// Autosave: only when there are unsaved changes and editor DOM is present
 useEffect(() => {
-  autosaveTimerRef.current = setInterval(() => {
-    if (hasUnsavedChanges && !isSaving) {
-      saveActiveEditorContent();
+  autosaveTimerRef.current = setInterval(async () => {
+    try {
+      // only attempt autosave when flag shows we've got edits and not currently saving
+      if (hasUnsavedChanges && !isSaving) {
+        // save without forcing, and do NOT allow empty overwrites by default
+        await saveActiveEditorContent({ force: false, allowEmpty: false });
+      }
+    } catch (e) {
+      console.warn('Autosave tick error', e);
     }
-  }, 3000); // Save every 3 seconds if there are changes
+  }, 3000);
 
-  const beforeunload = (e) => {
+  const beforeunload = async (e) => {
+    // On unload, try a forced save (allow empty because user may have emptied file intentionally)
+    try {
+      await saveActiveEditorContent({ force: true, allowEmpty: true });
+    } catch (err) { /* swallow */ }
     if (hasUnsavedChanges) {
-      // Optional: Warn user about unsaved changes
       e.preventDefault();
       e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
       return e.returnValue;
     }
   };
-  
   window.addEventListener('beforeunload', beforeunload);
 
   return () => {
@@ -1719,6 +1764,7 @@ useEffect(() => {
     window.removeEventListener('beforeunload', beforeunload);
   };
 }, [hasUnsavedChanges, isSaving]);
+
 
 
   // alias to allow nested actions reference
