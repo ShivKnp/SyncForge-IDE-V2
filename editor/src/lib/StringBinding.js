@@ -1,208 +1,385 @@
-class StringBinding {
-  constructor(doc, path, localPresence) {
-    this.doc = doc;
-    this.path = path;
-    this.localPresence = localPresence;
-    this.isInitialSync = true;
+import { useState, useEffect, useCallback } from 'react';
+import { notification } from 'antd';
+import { v4 as uuidv4 } from 'uuid';
 
-    this.editor = null;
-    this.model = null;
-    this.monaco = null;
+export const useWhiteboard = (doc, userName, isHost) => {
+  const [boards, setBoards] = useState({});
+  const [activeBoard, setActiveBoard] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  
+  // Initialize host board on mount
+  useEffect(() => {
+    if (!doc || !isHost) return;
+    
+    const initializeHostBoard = () => {
+      const currentBoards = doc.data.boards || {};
+      if (!currentBoards.host) {
+        createBoard('host', "Host's Notes", true);
+      }
+    };
 
-    this._changeListener = null;
-    this._cursorListener = null;
-    this._opListener = this._opListener.bind(this);
-    this._onCursorChange = this._onCursorChange.bind(this);
-    this._onEditorChange = this._onEditorChange.bind(this);
-
-    this.localChange = false;
-    this._debounceTimer = null;
-    this._debounceDelay = 120; // reduced from 300 -> faster submit
-  }
-
-  attach(editor) {
-    if (!editor) return;
-    this.editor = editor;
-    this.model = editor.getModel();
-    this.monaco = window.monaco || null;
-
-    // initial safe sync
-    this.update();
-    this.isInitialSync = false;
-
-    // listen for remote ops
-    this.doc.on('op', this._opListener);
-
-    // listen for local editor changes (debounced)
-    if (this.model && !this._changeListener) {
-      this._changeListener = this.model.onDidChangeContent(() => this._onEditorChange());
+    if (doc.type) {
+      initializeHostBoard();
+    } else {
+      const fetchDoc = () => {
+        doc.fetch((err) => {
+          if (!err && doc.type) {
+            initializeHostBoard();
+          }
+        });
+      };
+      fetchDoc();
     }
-    try {
-      this._cursorListener = this.editor.onDidChangeCursorSelection(this._onCursorChange);
-    } catch (e) {}
-  }
+  }, [doc, isHost]);
 
-  detach() {
-    try { if (this._changeListener) this._changeListener.dispose(); } catch (e) {}
-    try { if (this._cursorListener) this._cursorListener.dispose(); } catch (e) {}
-    try { this.doc.off('op', this._opListener); } catch (e) {}
-    if (this._debounceTimer) clearTimeout(this._debounceTimer);
-    this._debounceTimer = null;
-  }
+  // Subscribe to board changes
+  useEffect(() => {
+    if (!doc) return;
 
-  updatePath(newPath) {
-    this.detach();
-    this.path = newPath;
-    this.isInitialSync = true;
-    this.attach(this.editor);
-  }
+    const updateBoards = () => {
+      if (doc.data) {
+        setBoards(doc.data.boards || {});
+        setIsLoading(false);
+      }
+    };
 
-  // --- minimal-edit helper ---
-  _computeMinimalEdit(oldStr, newStr) {
-    if (oldStr === newStr) return null;
-    let start = 0;
-    const oldLen = oldStr.length;
-    const newLen = newStr.length;
-    const minLen = Math.min(oldLen, newLen);
-
-    // find common prefix
-    while (start < minLen && oldStr[start] === newStr[start]) start++;
-
-    // find common suffix
-    let endOld = oldLen - 1;
-    let endNew = newLen - 1;
-    while (endOld >= start && endNew >= start && oldStr[endOld] === newStr[endNew]) {
-      endOld--;
-      endNew--;
-    }
-
-    const replaceStart = start;
-    const replaceEnd = endOld + 1; // exclusive
-    const replacementText = newStr.slice(start, endNew + 1);
-    return { start: replaceStart, end: replaceEnd, text: replacementText };
-  }
-
-  // Apply minimal edit to Monaco model (safer than setValue)
-  _applyRemoteValueMinimal(docValue) {
-    if (!this.model || !this.monaco) {
-      // fallback to setValue if we don't have monaco/model
-      try { this.model.setValue(docValue); } catch (e) { console.warn('fallback setValue failed', e); }
-      return;
-    }
-
-    const modelValue = this.model.getValue();
-    if (modelValue === docValue) return;
-
-    const edit = this._computeMinimalEdit(modelValue, docValue);
-    if (!edit) {
-      // fallback
-      try { this.model.setValue(docValue); } catch (e) { console.warn('setValue fallback failed', e); }
-      return;
-    }
-
-    try {
-      // convert offsets to positions
-      const startPos = this.model.getPositionAt(edit.start);
-      const endPos = this.model.getPositionAt(edit.end);
-      const range = new this.monaco.Range(
-        startPos.lineNumber, startPos.column,
-        endPos.lineNumber, endPos.column
-      );
-
-      // mark localChange to avoid echoing back
-      this.localChange = true;
-      this.model.pushEditOperations(
-        [], // no selection adjustments
-        [{ range, text: edit.text, forceMoveMarkers: true }],
-        () => null
-      );
-    } catch (e) {
-      // fallback setValue on any error
-      try { this.model.setValue(docValue); } catch (err) { console.warn('pushEditOperations failed', err); }
-    } finally {
-      // clear localChange on next tick
-      setTimeout(() => { this.localChange = false; }, 0);
-    }
-  }
-
-  update() {
-    const docValue = this._getDeepValue(this.doc && this.doc.data ? this.doc.data : {}, this.path) || '';
-    if (!this.model) return;
-
-    const modelValue = this.model.getValue();
-
-    if (this.isInitialSync) {
-      if (modelValue !== docValue) {
-        this.localChange = true;
-        try {
-          this.model.setValue(docValue);
-        } catch (e) {
-          console.warn('StringBinding.update initial setValue failed', e);
-        } finally {
-          setTimeout(() => { this.localChange = false; }, 0);
+    // Initial data
+    if (doc.type) {
+      updateBoards();
+    } else {
+      doc.fetch((err) => {
+        if (!err) {
+          updateBoards();
         }
-      }
+      });
+    }
+
+    // Subscribe to changes
+    const onChange = () => {
+      updateBoards();
+    };
+
+    doc.subscribe(onChange);
+
+    return () => {
+      doc.unsubscribe(onChange);
+    };
+  }, [doc]);
+
+  // Safe submit operation helper (matching your useEditorState pattern)
+  const safeSubmitOp = useCallback((ops, meta) => {
+    try {
+      if (doc && doc.type) doc.submitOp(ops, meta);
+      else console.warn('safeSubmitOp: no doc or doc has no type', ops);
+    } catch (e) {
+      console.warn('safeSubmitOp failed', e, ops);
+    }
+  }, [doc]);
+
+  // Create a new board
+  const createBoard = useCallback((boardId, name, isHostBoard = false) => {
+    if (!doc) {
+      notification.error({ message: 'Not connected to document' });
       return;
     }
 
-    // For subsequent updates: apply minimal edit if values differ
-    if (modelValue !== docValue) {
-      this._applyRemoteValueMinimal(docValue);
+    const boardData = {
+      id: boardId,
+      name,
+      owner: userName,
+      isShared: isHostBoard,
+      allowParticipantsEdit: false,
+      content: JSON.stringify({
+        document: {
+          id: 'document',
+          name: 'New Document',
+          version: 1,
+          pages: {
+            page: {
+              id: 'page',
+              name: 'Page 1',
+              childIndex: 1,
+              shapes: {},
+              bindings: {},
+            },
+          },
+          pageStates: {
+            page: {
+              id: 'page',
+              selectedIds: [],
+              camera: {
+                x: 0,
+                y: 0,
+                z: 1,
+              },
+            },
+          },
+          assets: {},
+        },
+        schema: {
+          schemaVersion: 1,
+          storeVersion: 1,
+          recordVersions: {},
+        },
+      }),
+      createdAt: Date.now(),
+      lastModified: Date.now(),
+    };
+
+    try {
+      // Ensure boards object exists
+      const currentBoards = doc.data.boards || {};
+      const newBoards = { ...currentBoards, [boardId]: boardData };
+      
+      safeSubmitOp([{
+        p: ['boards'],
+        oi: newBoards,
+      }], { source: 'createBoard' });
+
+      setActiveBoard(boardId);
+      notification.success({ message: `Board "${name}" created` });
+    } catch (error) {
+      console.error('Failed to create board:', error);
+      notification.error({ message: 'Failed to create board' });
     }
-  }
+  }, [doc, userName, safeSubmitOp]);
 
-  _onEditorChange() {
-    if (this.localChange || !this.doc || !this.model) return;
+  // Create a new private board
+  const createPrivateBoard = useCallback((name) => {
+    const boardId = `private_${uuidv4()}`;
+    createBoard(boardId, name, false);
+  }, [createBoard]);
 
-    if (this._debounceTimer) clearTimeout(this._debounceTimer);
-    this._debounceTimer = setTimeout(() => {
-      this._debounceTimer = null;
-      const newValue = this.model.getValue();
-      const existing = this._getDeepValue(this.doc.data || {}, this.path) || '';
-      if (newValue === existing) return;
+  // Delete a board
+  const deleteBoard = useCallback((boardId) => {
+    if (!doc) return;
 
-      this.localChange = true;
-      try {
-        // safer: include old value (od) + new value (oi) as replacement
-        // JSON0 replace op uses oi/od — this preserves context for some OT engines
-        this.doc.submitOp([{ p: this.path, od: existing, oi: newValue }], { source: this });
-      } catch (e) {
-        console.error('StringBinding submit failed', e);
-      } finally {
-        setTimeout(() => { this.localChange = false; }, 0);
-      }
-    }, this._debounceDelay);
-  }
+    const boardToDelete = boards[boardId];
+    if (!boardToDelete) return;
 
-  _onCursorChange(event) {
-    if (this.localPresence && this.doc && this.doc.data) {
-      try {
-        this.localPresence.submit({ cursor: event.selection, name: this.doc.data.userName || '' });
-      } catch (e) {}
+    // Check permissions
+    if (boardId === 'host' && !isHost) {
+      notification.error({ message: 'Only host can delete the host board' });
+      return;
     }
-  }
 
-  _opListener(op, source) {
-    if (source === this) return; // ignore our own ops
-    if (!Array.isArray(op)) return;
-
-    // quickly check whether op touched our path -> call update which now applies minimal edits
-    for (const comp of op) {
-      if (!comp || !comp.p) continue;
-      const p = comp.p;
-      if (p.length !== this.path.length) continue;
-      let matches = true;
-      for (let i = 0; i < this.path.length; ++i) {
-        if (p[i] !== this.path[i]) { matches = false; break; }
-      }
-      if (matches) {
-        this.update();
-        break;
-      }
+    if (boardId.startsWith('private_') && boardToDelete.owner !== userName) {
+      notification.error({ message: 'You can only delete your own private boards' });
+      return;
     }
-  }
 
-  _getDeepValue(obj, path) {
-    return path.reduce((acc, key) => (acc && acc[key] !== undefined) ? acc[key] : undefined, obj);
-  }
-}
+    try {
+      const currentBoards = { ...boards };
+      delete currentBoards[boardId];
+      
+      safeSubmitOp([{
+        p: ['boards'],
+        oi: currentBoards,
+      }], { source: 'deleteBoard' });
+
+      if (activeBoard === boardId) {
+        setActiveBoard(null);
+      }
+      notification.success({ message: `Board "${boardToDelete.name}" deleted` });
+    } catch (error) {
+      console.error('Failed to delete board:', error);
+      notification.error({ message: 'Failed to delete board' });
+    }
+  }, [doc, boards, activeBoard, isHost, userName, safeSubmitOp]);
+
+  // Update board content
+  const updateBoardContent = useCallback((boardId, content) => {
+    if (!doc) return;
+
+    const board = boards[boardId];
+    if (!board) return;
+
+    // Check edit permissions
+    if (!canEditBoard(board)) {
+      notification.warning({ message: 'You do not have permission to edit this board' });
+      return;
+    }
+
+    try {
+      const updatedBoards = { ...boards };
+      updatedBoards[boardId] = {
+        ...updatedBoards[boardId],
+        content: content,
+        lastModified: Date.now(),
+      };
+      
+      safeSubmitOp([{
+        p: ['boards'],
+        oi: updatedBoards,
+      }], { source: 'updateBoardContent' });
+    } catch (error) {
+      console.error('Failed to update board content:', error);
+    }
+  }, [doc, boards, safeSubmitOp]);
+
+  // Share a private board
+  const sharePrivateBoard = useCallback((boardId) => {
+    if (!doc) return;
+
+    const board = boards[boardId];
+    if (!board || !boardId.startsWith('private_')) return;
+
+    if (board.owner !== userName) {
+      notification.error({ message: 'You can only share your own private boards' });
+      return;
+    }
+
+    try {
+      const updatedBoards = { ...boards };
+      updatedBoards[boardId] = {
+        ...updatedBoards[boardId],
+        isShared: true,
+      };
+      
+      safeSubmitOp([{
+        p: ['boards'],
+        oi: updatedBoards,
+      }], { source: 'sharePrivateBoard' });
+
+      notification.success({ message: 'Board shared with participants' });
+    } catch (error) {
+      console.error('Failed to share board:', error);
+      notification.error({ message: 'Failed to share board' });
+    }
+  }, [doc, boards, userName, safeSubmitOp]);
+
+  // Set board edit mode (host only)
+  const setBoardEditMode = useCallback((boardId, allowParticipantsEdit) => {
+    if (!doc || !isHost) return;
+
+    const board = boards[boardId];
+    if (!board || boardId !== 'host') {
+      notification.error({ message: 'Only host board edit mode can be changed' });
+      return;
+    }
+
+    try {
+      const updatedBoards = { ...boards };
+      updatedBoards[boardId] = {
+        ...updatedBoards[boardId],
+        allowParticipantsEdit: allowParticipantsEdit,
+      };
+      
+      safeSubmitOp([{
+        p: ['boards'],
+        oi: updatedBoards,
+      }], { source: 'setBoardEditMode' });
+
+      notification.success({ 
+        message: `Participants can ${allowParticipantsEdit ? 'now edit' : 'no longer edit'} the host board` 
+      });
+    } catch (error) {
+      console.error('Failed to update board edit mode:', error);
+      notification.error({ message: 'Failed to update board permissions' });
+    }
+  }, [doc, boards, isHost, safeSubmitOp]);
+
+  // Check if user can edit a specific board
+  const canEditBoard = useCallback((board) => {
+    if (!board) return false;
+
+    // Private boards: only owner can edit
+    if (board.id?.startsWith('private_') || board.owner === userName) {
+      return board.owner === userName;
+    }
+
+    // Host board: host or participants if allowed
+    if (board.id === 'host') {
+      return isHost || board.allowParticipantsEdit;
+    }
+
+    return false;
+  }, [isHost, userName]);
+
+  // Get available boards for current user
+  const getAvailableBoards = useCallback(() => {
+    return Object.entries(boards)
+      .map(([id, board]) => ({
+        id,
+        ...board,
+        canEdit: canEditBoard(board),
+      }))
+      .filter(board => {
+        // Show host board to everyone
+        if (board.id === 'host') return true;
+        
+        // Show private boards if they're shared or owned by current user
+        if (board.id.startsWith('private_')) {
+          return board.isShared || board.owner === userName;
+        }
+        
+        return false;
+      })
+      .sort((a, b) => {
+        // Host board first, then by creation date
+        if (a.id === 'host') return -1;
+        if (b.id === 'host') return 1;
+        return (b.createdAt || 0) - (a.createdAt || 0);
+      });
+  }, [boards, canEditBoard, userName]);
+
+  // Get board content as JSON
+  const getBoardContent = useCallback((boardId) => {
+    const board = boards[boardId];
+    if (!board || !board.content) return null;
+    
+    try {
+      return JSON.parse(board.content);
+    } catch (error) {
+      console.error('Failed to parse board content:', error);
+      return null;
+    }
+  }, [boards]);
+
+  return {
+    // State
+    boards,
+    activeBoard,
+    isLoading,
+    
+    // Actions
+    createBoard,
+    createPrivateBoard,
+    deleteBoard,
+    updateBoardContent,
+    sharePrivateBoard,
+    setBoardEditMode,
+    setActiveBoard,
+    
+    // Utilities
+    canEditBoard,
+    getAvailableBoards,
+    getBoardContent,
+    
+    // Permissions
+    hasHostBoard: !!boards.host,
+    canCreateBoards: true, // All users can create private boards
+  };
+};
+
+// Custom hook for individual whiteboard instance
+export const useWhiteboardInstance = (doc, userName, isHost, boardId) => {
+  const whiteboard = useWhiteboard(doc, userName, isHost);
+  const { boards, updateBoardContent, canEditBoard } = whiteboard;
+  
+  const board = boards[boardId];
+  const canEdit = canEditBoard(board);
+  
+  const updateContent = useCallback((content) => {
+    updateBoardContent(boardId, content);
+  }, [updateBoardContent, boardId]);
+  
+  return {
+    board,
+    canEdit,
+    updateContent,
+    isLoading: whiteboard.isLoading,
+  };
+};
+
+export default useWhiteboard;
