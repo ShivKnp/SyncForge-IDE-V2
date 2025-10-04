@@ -36,14 +36,23 @@ const LobbyPage = () => {
   const [enableHostNotes, setEnableHostNotes] = useState(true);
 
   // Media / preview
+  // Restore mic/camera state from sessionStorage (set in lobby)
   const [isMicOn, setIsMicOn] = useState(() => {
-    const saved = sessionStorage.getItem('codecrew-mic-on');
-    return saved !== null ? saved === 'true' : true;
+    try {
+      const saved = sessionStorage.getItem('codecrew-mic-on');
+      return saved !== null ? saved === 'true' : true;
+    } catch (e) {
+      return true;
+    }
   });
-
+  
   const [isCameraOn, setIsCameraOn] = useState(() => {
-    const saved = sessionStorage.getItem('codecrew-camera-on');
-    return saved !== null ? saved === 'true' : true;
+    try {
+      const saved = sessionStorage.getItem('codecrew-camera-on');
+      return saved !== null ? saved === 'true' : true;
+    } catch (e) {
+      return true;
+    }
   });
 
   const [localStream, setLocalStream] = useState(null);
@@ -191,14 +200,32 @@ const LobbyPage = () => {
       notification.warning({ message: 'Name Required' });
       return;
     }
-    // Save current media state
-    sessionStorage.setItem('codecrew-mic-on', isMicOn.toString());
-    sessionStorage.setItem('codecrew-camera-on', isCameraOn.toString());
 
     if (isLoading) {
       notification.info({ message: 'Checking session... please wait' });
       return;
     }
+
+    // Get current media state from actual tracks before saving
+    const stream = localStreamRef.current;
+    let currentMicState = isMicOn;
+    let currentCameraState = isCameraOn;
+    
+    if (stream) {
+      const audioTracks = stream.getAudioTracks();
+      const videoTracks = stream.getVideoTracks();
+      
+      if (audioTracks.length > 0) {
+        currentMicState = audioTracks[0].enabled;
+      }
+      if (videoTracks.length > 0) {
+        currentCameraState = videoTracks[0].enabled;
+      }
+    }
+
+    // Save actual media state to sessionStorage
+    sessionStorage.setItem('codecrew-mic-on', currentMicState.toString());
+    sessionStorage.setItem('codecrew-camera-on', currentCameraState.toString());
 
     try {
       if (isRoomCreator) {
@@ -227,8 +254,6 @@ const LobbyPage = () => {
     sessionStorage.setItem('codecrew-username', userName);
     sessionStorage.setItem('codecrew-project-language', projectLanguage);
     sessionStorage.setItem('codecrew-room-mode', roomMode);
-    sessionStorage.setItem('codecrew-mic-on', isMicOn);
-    sessionStorage.setItem('codecrew-camera-on', isCameraOn);
     sessionStorage.setItem('codecrew-enable-host-notes', enableHostNotes.toString());
 
     // stop preview stream then navigate
@@ -242,7 +267,6 @@ const LobbyPage = () => {
 
     navigate(`/editor/${id}`);
   };
-
   const handleCopyLink = () => {
     const url = `${window.location.origin}/lobby/${id}`;
     navigator.clipboard.writeText(url);
@@ -419,7 +443,7 @@ const LobbyPage = () => {
                     data-mode="polyglot"
                   >
                     <FaGlobe className="mode-icon" />
-                    <span className="mode-label">Playground</span>
+                    <span className="mode-label">Polyglot</span>
                   </button>
                 </div>
               </div>
@@ -1448,6 +1472,5 @@ const LobbyPage = () => {
     </>
   );
 };
-
 
 export default LobbyPage;
