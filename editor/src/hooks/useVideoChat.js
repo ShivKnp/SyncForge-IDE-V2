@@ -22,8 +22,26 @@ export const useVideoChat = (roomId, userName) => {
   const [localPeerId, setLocalPeerId] = useState(null);
   const [localStream, setLocalStream] = useState(null);
   const [peers, setPeers] = useState(new Map());
-  const [isMicOn, setIsMicOn] = useState(true);
-  const [isCameraOn, setIsCameraOn] = useState(true);
+  
+  // Restore mic/camera state from sessionStorage (set in lobby)
+  const [isMicOn, setIsMicOn] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('codecrew-mic-on');
+      return saved !== null ? saved === 'true' : true;
+    } catch (e) {
+      return true;
+    }
+  });
+  
+  const [isCameraOn, setIsCameraOn] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('codecrew-camera-on');
+      return saved !== null ? saved === 'true' : true;
+    } catch (e) {
+      return true;
+    }
+  });
+  
   const [pinnedPeerId, setPinnedPeerId] = useState(null);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [playbackEnabled, setPlaybackEnabled] = useState(false);
@@ -328,7 +346,32 @@ export const useVideoChat = (roomId, userName) => {
       
       try { 
         ws.send(JSON.stringify({ type: 'join', name: userName })); 
-        ws.send(JSON.stringify({ type: 'media-update', data: { audio: isMicOn, video: isCameraOn } }));
+        // Send initial media state from sessionStorage
+        const initialMicState = (() => {
+          try {
+            const saved = sessionStorage.getItem('codecrew-mic-on');
+            return saved !== null ? saved === 'true' : true;
+          } catch (e) {
+            return true;
+          }
+        })();
+        const initialCameraState = (() => {
+          try {
+            const saved = sessionStorage.getItem('codecrew-camera-on');
+            return saved !== null ? saved === 'true' : true;
+          } catch (e) {
+            return true;
+          }
+        })();
+        ws.send(JSON.stringify({ 
+          type: 'media-update', 
+          data: { 
+            audio: initialMicState, 
+            video: initialCameraState,
+            isMicOn: initialMicState,
+            isCameraOn: initialCameraState
+          } 
+        }));
       } catch (e) {
         console.warn('[WS] failed to send join message', e);
       }
@@ -538,7 +581,7 @@ export const useVideoChat = (roomId, userName) => {
       console.error('[WS] ws error', err);
       setConnectionStatus('error');
     };
-  }, [roomId, userName, cleanupPeerConnection, sendToServer, createPeerConnection, localPeerId, isScreenSharing, pinnedPeerId, navigate, isMicOn, isCameraOn]);
+  }, [roomId, userName, cleanupPeerConnection, sendToServer, createPeerConnection, localPeerId, isScreenSharing, pinnedPeerId, navigate]);
 
   // WebSocket effect - setup only when needed
   useEffect(() => {
@@ -552,7 +595,7 @@ export const useVideoChat = (roomId, userName) => {
     };
   }, [roomId, userName, setupWebSocket]);
 
-  // Acquire local media - ONLY ONCE
+  // Acquire local media - ONLY ONCE, with proper initial track state
   useEffect(() => {
     let cancelled = false;
     const initMedia = async () => {
@@ -565,9 +608,22 @@ export const useVideoChat = (roomId, userName) => {
           s.getTracks().forEach(t => t.stop());
           return;
         }
+        
+        // Apply saved mic/camera state to tracks immediately
+        const audioTracks = s.getAudioTracks();
+        const videoTracks = s.getVideoTracks();
+        
+        audioTracks.forEach(track => {
+          track.enabled = isMicOn;
+        });
+        
+        videoTracks.forEach(track => {
+          track.enabled = isCameraOn;
+        });
+        
         cameraStreamRef.current = s;
         setLocalStream(s);
-        console.log('[useVideoChat] local media acquired');
+        console.log('[useVideoChat] local media acquired with mic:', isMicOn, 'camera:', isCameraOn);
       } catch (err) {
         console.error('[useVideoChat] getUserMedia failed', err);
         alert('Could not access camera/microphone. Please check permissions.');
@@ -575,7 +631,7 @@ export const useVideoChat = (roomId, userName) => {
     };
     initMedia();
     return () => { cancelled = true; };
-  }, []);
+  }, []); // Run only once on mount
 
   // When localStream changes, add tracks to existing PCs
   useEffect(() => {
@@ -649,48 +705,48 @@ export const useVideoChat = (roomId, userName) => {
 
   // mic/camera toggles
   const toggleMic = useCallback(() => {
-  const currentStream = isScreenSharing && screenStreamRef.current 
-    ? screenStreamRef.current 
-    : cameraStreamRef.current;
+    const currentStream = isScreenSharing && screenStreamRef.current 
+      ? screenStreamRef.current 
+      : cameraStreamRef.current;
+      
+    if (!currentStream) return;
     
-  if (!currentStream) return;
-  
-  const newState = !isMicOn;
-  
-  currentStream.getAudioTracks().forEach(t => t.enabled = newState);
-  
-  try {
-    sessionStorage.setItem('codecrew-mic-on', String(newState));
-  } catch (e) {}
-  
-  setIsMicOn(newState);
-  
-  try {
-    sendToServer({ type: 'media-update', data: { isMicOn: newState, isCameraOn } });
-  } catch (e) {}
-}, [isMicOn, isCameraOn, sendToServer, isScreenSharing]);
+    const newState = !isMicOn;
+    
+    currentStream.getAudioTracks().forEach(t => t.enabled = newState);
+    
+    try {
+      sessionStorage.setItem('codecrew-mic-on', String(newState));
+    } catch (e) {}
+    
+    setIsMicOn(newState);
+    
+    try {
+      sendToServer({ type: 'media-update', data: { isMicOn: newState, isCameraOn } });
+    } catch (e) {}
+  }, [isMicOn, isCameraOn, sendToServer, isScreenSharing]);
 
   const toggleCamera = useCallback(() => {
-  const currentStream = isScreenSharing && screenStreamRef.current 
-    ? screenStreamRef.current 
-    : cameraStreamRef.current;
+    const currentStream = isScreenSharing && screenStreamRef.current 
+      ? screenStreamRef.current 
+      : cameraStreamRef.current;
+      
+    if (!currentStream) return;
     
-  if (!currentStream) return;
-  
-  const newState = !isCameraOn;
-  
-  currentStream.getVideoTracks().forEach(t => t.enabled = newState);
-  
-  try {
-    sessionStorage.setItem('codecrew-camera-on', String(newState));
-  } catch (e) {}
-  
-  setIsCameraOn(newState);
-  
-  try {
-    sendToServer({ type: 'media-update', data: { isCameraOn: newState, isMicOn } });
-  } catch (e) {}
-}, [isCameraOn, isMicOn, sendToServer, isScreenSharing]);
+    const newState = !isCameraOn;
+    
+    currentStream.getVideoTracks().forEach(t => t.enabled = newState);
+    
+    try {
+      sessionStorage.setItem('codecrew-camera-on', String(newState));
+    } catch (e) {}
+    
+    setIsCameraOn(newState);
+    
+    try {
+      sendToServer({ type: 'media-update', data: { isCameraOn: newState, isMicOn } });
+    } catch (e) {}
+  }, [isCameraOn, isMicOn, sendToServer, isScreenSharing]);
 
   const handlePinPeer = useCallback((peerId) => {
     setPinnedPeerId(current => (current === peerId ? null : peerId));
